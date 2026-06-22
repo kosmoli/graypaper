@@ -1,0 +1,446 @@
+\newcommand*{\local¬fnsrmap}{P}
+\newcommand*{\local¬fnservouts}{B}
+\newcommand*{\local¬fngasused}{U}
+\newcommand*{\local¬fnprovidable}{Y}
+\newcommand*{\local¬fnprovide}{I}
+\newcommand*{\local¬numberofreportsaccumulated}{n}
+\newcommand*{\local¬servicegasused}{\mathbf{u}}
+\newcommand*{\local¬processedtransfers}{\mathbf{t}}
+
+\section{累积（Accumulation）}
+\label{sec:accumulation}
+
+累积可以被定义为一个函数，其参数是 $\justbecameavailable$ 和 $\accounts$，以及（有时是部分转换的）状态的选定部分，其产生后验服务状态 $\accountspostpreimage$ 以及附加状态元素 $\stagingset'$、$\authqueue'$ 和 $\privileges'$。
+
+累积的命题实际上非常简单：我们只需要执行每个至少有一个 work-digest 的服务的服务代码中的 \emph{Accumulate} 逻辑，将来自所述摘要的相关数据以及有用的上下文信息传递给它。然而，有三个主要的复杂因素。首先，我们必须定义此逻辑的执行环境，特别是可用的宿主函数。其次，我们必须定义每个服务执行允许的 gas 量。最后，我们必须确定 Accumulate 内转移的性质。
+
+
+
+
+\subsection{历史与队列（History and Queuing）}
+
+当 work-report 有尚未满足的依赖项时，其累积会被延迟；当依赖项无效时，累积会被完全取消。依赖项被指定为 work-package 哈希，为了知道哪些 work-package 已经被累积，我们维护一个累积历史记录。此历史记录 $\accumulated$ 足以容纳一个纪元的 work-report。形式化定义如下：
+\begin{align}
+  \label{eq:accumulatedspec}
+  \accumulated &\in \sequence[\Cepochlen]{\protoset{\hash}} \\
+  \accumulatedcup &\equiv \bigcup_{x \in \accumulated}(x)
+\end{align}
+
+我们还在状态项 $\ready$ 中维护对已就绪（即已可用和/或已审计）但尚未累积的 work-report 的了解。这些中的每一个都是最多一个纪元前变为可用的，但有或曾有未满足的依赖项。除了 work-report 本身外，我们还保留其未累积的依赖项（一组 work-package 哈希）。形式化定义如下：
+\begin{align}
+  \label{eq:readyspec}
+  \ready &\in \sequence[\Cepochlen]{\sequence{\tuple{\workreport, \protoset{\hash}}}}
+\end{align}
+
+新可用的 work-report $\justbecameavailable$ 根据是否具有零先决 work-report 的条件被分为两个序列。满足条件的 $\justbecameavailable^!$ 会立即累积。不满足的 $\justbecameavailable^Q$ 进入队列执行。形式化定义如下：
+\begin{align}
+  \justbecameavailable^! &\equiv \sq{\build{r}{r \orderedin \justbecameavailable, \len{(r_\wr¬context)_\wc¬prerequisites} = 0 \wedge r_\wr¬srlookup = \emset}} \\
+  \justbecameavailable^Q &\equiv E(\sq{
+    D(r) \mid
+    r \orderedin \justbecameavailable,
+    \len{(r_\wr¬context)_\wc¬prerequisites} > 0 \vee r_\wr¬srlookup \ne \emset
+  }, \accumulatedcup)\!\!\!\!\\
+  D(r) &\equiv (r, \set{(r_\wr¬context)_\wc¬prerequisites} \cup \keys{r_\wr¬srlookup})
+\end{align}
+
+我们定义队列编辑函数 $E$，它本质上是类似 $\ready$ 项目的变异函数，以现已累积的 work-package 哈希集合（$\accumulated$ 中的那些）为参数。它用于在某些 work-report 被累积时更新 work-report 队列。功能上，它移除 work-report 哈希在作为参数提供的集合中的所有条目，并移除出现在该集合中的任何依赖项。形式化定义如下：
+\begin{equation}
+  E\colon\abracegroup{
+      &\tuple{\sequence{\tuple{\workreport, \protoset{\hash}}}, \protoset{\hash}} \to \sequence{\tuple{\workreport, \protoset{\hash}}} \\
+    &\tup{\mathbf{r}, \mathbf{x}} \mapsto \sq{\build{
+      \tup{r, \mathbf{d} \setminus \mathbf{x}}
+    }{
+      \begin{aligned}
+        &\tup{r, \mathbf{d}} \orderedin \mathbf{r} ,\\
+        &(r_\wr¬avspec)_\as¬packagehash \not\in \mathbf{x}
+      \end{aligned}
+    }}
+  }
+\end{equation}
+
+我们进一步定义累积优先队列函数 $Q$，它提供在给定一组尚未累积的 work-report 及其依赖项的情况下能够累积的 work-report 序列。
+\begin{equation}
+  Q\colon\abracegroup{
+    &\sequence{\tuple{\workreport, \protoset{\hash}}} \to \workreports \\
+    &\mathbf{r} \mapsto \begin{cases}
+      \sq{} &\when \mathbf{g} = \sq{} \\
+      \mathbf{g} \concat Q(E(\mathbf{r}, \local¬fnsrmap(\mathbf{g})))\!\!\!\! &\otherwise \\
+      \multicolumn{2}{l}{\,\where \mathbf{g} = \sq{\build{r}{\tup{r, \emset} \orderedin \mathbf{r}}}}
+    \end{cases}
+  }
+\end{equation}
+
+最后，我们定义映射函数 $\local¬fnsrmap$，它从 work-report 集合中提取对应的 work-package 哈希：
+\begin{equation}
+  \local¬fnsrmap\colon\abracegroup{
+    \protoset{\workreport} &\to \protoset{\hash}\\
+    \mathbf{r} &\mapsto \set{
+      \build{(r_\wr¬avspec)_\as¬packagehash}{r \in \mathbf{r}}
+    }
+  }
+\end{equation}
+
+我们现在可以定义本区块中可累积的 work-report 序列为 $\justbecameavailable^*$：
+\begin{align}
+  \using m &= \H_\¬timeslot \bmod \Cepochlen\\
+  \justbecameavailable^* &\equiv \justbecameavailable^! \concat Q(\mathbf{q}) \\
+  \quad\where \mathbf{q} &= E(\concatall{\ready\interval{m}{}} \concat \concatall{\ready\interval{}{m}} \concat \justbecameavailable^Q, \local¬fnsrmap(\justbecameavailable^!))
+\end{align}
+
+\subsection{执行（Execution）}
+\label{sec:accumulationexecution}
+
+我们每个区块有有限的 gas 量，因此可能无法在单个区块中处理 $\justbecameavailable^*$ 中的所有项目。有两个略为对立的因素使我们能够优化单个区块中累积的 work-item 数量，从而优化 work-report 的数量：
+
+首先，虽然我们为每个要累积的 work-item 设定了众所周知的 gas 限制，但累积仍可能导致较低的 gas 使用量。只有在 work-item 被累积后才能知道它是否使用了低于公布限制的 gas。这意味着顺序执行模式。
+
+其次，由于 \textsc{pvm} 设置不能期望零成本，我们希望将此成本分摊到尽可能多的 work-item 上。这可以通过将与同一服务关联的 work-item 聚合到同一 \textsc{pvm} 调用中来实现。这意味着非顺序执行模式。
+
+我们通过定义函数 $\accseq$ 来解决这个问题，该函数顺序累积 work-report，它本身利用函数 $\accpar$ 以非顺序的、服务聚合的方式累积 work-report。在 $\accseq$ 的所有调用中，除第一次外，我们还整合上一轮累积隐含的任何 \emph{deferred-transfer}（延迟转移）的效果，因此累积函数必须同时接受 work-digest 中包含的信息和延迟转移的信息。
+
+我们不将完整的 work-digest 传入累积，而是从中提取关键信息并与其 work-report 隐含的信息相结合。我们将这种组合值称为 \emph{operand tuple}（操作数元组），$\operandtuple$。同样，我们将表征 \emph{deferred transfer}（延迟转移）的集合记为 $\defxfer$，注意转移包含一个备忘录组件 $\dx¬memo$（$\Cmemosize = 128$ 八位字节），以及发送方的服务索引 $\dx¬source$、接收方的服务索引 $\dx¬dest$、待转移的余额 $\dx¬amount$ 和转移的 gas 限制 $\dx¬gas$。形式化定义如下：
+\begin{align}
+  \label{eq:operandtuple}
+  \operandtuple &\equiv \tuple{
+    \begin{alignedat}{5}
+      \isa{\ot¬packagehash&}{\hash},\;
+      \isa{&\ot¬segroot&}{\hash},\;
+      \isa{&\ot¬authorizer&}{\hash},\;
+      \isa{\ot¬payloadhash}{\hash},\;\\
+      \isa{\ot¬gaslimit&}{\gas},\;
+      \isa{&\ot¬authtrace&}{\blob},\;
+      \isa{&\ot¬result&}{\blob \cup \workerror}
+    \end{alignedat}
+  }\\
+  \label{eq:defxfer}
+  \defxfer &\equiv \tuple{
+    \isa{\dx¬source}{\serviceid} ,
+    \isa{\dx¬dest}{\serviceid} ,
+    \isa{\dx¬amount}{\balance} ,
+    \isa{\dx¬memo}{\memo} ,
+    \isa{\dx¬gas}{\gas}
+  }
+\end{align}
+
+注意，这两者的联合表征了累积调用函数 $\Psi_A$ 的输入（定义见方程 \ref{eq:accinvocation}）。
+
+我们的形式化继续将 $\partialstate$ 定义为累积过程所需且可变的状态组件的表征（即能够表示的值）。这包括服务账户状态（如 $\accountspre$）、即将到来的验证者密钥 $\stagingset$、授权器队列 $\authqueue$ 和特权状态 $\privileges$。形式化定义如下：
+\begin{equation}
+  \label{eq:partialstate}
+  \partialstate \equiv \tuple{\begin{aligned}
+    &\isa{\ps¬accounts}{\dictionary{\serviceid}{\serviceaccount}} \,,\;
+    \isa{\ps¬stagingset}{\allvalkeys} \,,\;
+    \isa{\ps¬authqueue}{\sequence[\Ccorecount]{\sequence[\Cauthqueuesize]{\hash}}} \,,\;
+    \isa{\ps¬manager}{\serviceid} \,,\\
+    &\isa{\ps¬assigners}{\sequence[\Ccorecount]{\serviceid}} \,,\;
+    \isa{\ps¬delegator}{\serviceid} \,,\;
+    \isa{\ps¬registrar}{\serviceid} \,,\;
+    \isa{\ps¬alwaysaccers}{\dictionary{\serviceid}{\gas}}
+  \end{aligned}}
+\end{equation}
+
+最后，我们定义 $\local¬fnservouts$ 和 $\local¬fngasused$，它们分别表征服务索引的累积输出承诺和服务索引的 gas 使用量：
+\begin{equation}
+  \local¬fnservouts \equiv \protoset{\tuple{\serviceid, \hash}} \qquad
+  \local¬fngasused \equiv \sequence{\tuple{\serviceid, \gas}}
+\end{equation}
+
+我们定义外层累积函数 $\accseq$，它将一个 gas 限制、一个延迟转移序列、一个 work-report 序列、一个初始 partial-state 和一个享受免费累积的服务字典转换为累积的 work-report 数量、后验状态上下文、结果累积输出配对、服务索引的 gas 使用量和已处理转移序列的元组：
+\begin{equation}
+  \label{eq:accseq}
+  \accseq\colon\abracegroup{
+    &\tuple{\gas, \defxfers, \workreports, \partialstate, \dictionary{\serviceid}{\gas}} \to \tuple{\N, \partialstate, \local¬fnservouts, \local¬fngasused, \defxfers} \\
+    &\tup{g, \mathbf{t}, \mathbf{r}, \psX, \mathbf{f}} \!\mapsto\! \begin{cases}
+      \tup{0, \psX, \emset, \sq{}, \sq{}} &
+        \when n = 0 \\
+      \tup{i + j, \psX', \mathbf{b}^* \!\cup \mathbf{b}, \mathbf{u}^* \!\!\concat \mathbf{u}, \mathbf{t} \concat \mathbf{t}^\dagger}\!\!\!\! &
+        \text{o/w}\!\!\!\!\!\!\!\! \\
+    \end{cases} \\
+    &\quad\where i = \max(\Nmax{\len{\mathbf{r}} + 1}): \\
+    &\qquad \sum_{r \in \mathbf{r}\sub{\dots i}, d \in r_\wr¬digests}\!\!\!\!\!\!\!\!(d_\wd¬gaslimit) + \sum_{t \in \mathbf{t}}(t_\dx¬gas) + \!\!\!\!\sum_{x \in \values{\mathbf{f}}}\!\!\!\!(x) \le g \\
+    &\quad\also n = i + \len{\mathbf{t}} + \len{\mathbf{f}} \\
+    &\quad\also \tup{\psX^*\!\!, \mathbf{t}^*\!\!, \mathbf{b}^*\!\!, \mathbf{u}^*} = \accpar(\psX, \mathbf{t},\mathbf{r}\sub{\dots i}, \mathbf{f}) \\
+    &\quad\also \tup{j, \psX'\!, \mathbf{b}, \mathbf{u}, \mathbf{t}^\dagger} = \accseq(g^*, \mathbf{t}^*\!\!, \mathbf{r}\sub{i\dots}, \psX^*\!\!, \emset)\\
+    &\quad\also g^* = g + \sum_{t \in \mathbf{t^*}}(t_\dx¬gas) - \!\!\!\!\!\!\sum_{\tup{s, u} \in \mathbf{u}^*}\!\!\!\!\!\!\!(u)
+  }
+\end{equation}
+
+\newcommand*{\local¬accounts}{\mathbf{d}}
+\newcommand*{\local¬stagingset}{\mathbf{i}}
+\newcommand*{\local¬authqueue}{\mathbf{q}}
+\newcommand*{\local¬acc}{\accumulate}
+\newcommand*{\local¬manpost}{\mathbf{e}^*}
+\newcommand*{\local¬fnreplaceifchanged}{R}
+
+我们来定义并行化累积函数 $\accpar$，它在单服务累积函数 $\accone$ 的帮助下，将初始状态上下文、延迟转移序列、work-report 序列和享受免费累积的特权服务字典转换为后验状态上下文、结果延迟转移和累积输出配对以及服务索引 gas 使用量的元组。注意，对于特权，我们采用函数 $R$ 来选择管理器服务更改为的服务，或者如果未进行更改，则选择服务自身更改为的服务。这允许特权被"拥有"，并促进了我们认为是有帮助可能性的管理器服务的移除。形式化定义如下：
+\begin{equation}
+  \label{eq:accpar}
+  \accpar\colon\abracegroup[\;]{\begin{aligned}
+    &\tuple{\partialstate, \defxfers, \workreports, \dictionary{\serviceid}{\gas}} \to \tuple{\partialstate, \defxfers, \local¬fnservouts, \local¬fngasused} \\
+    &\tup{\psX, \mathbf{t}, \mathbf{r}, \mathbf{f}} \mapsto \tup{
+      \tup{
+        \ps¬accounts', \ps¬stagingset', \ps¬authqueue', \ps¬manager', \ps¬assigners', \ps¬delegator', \ps¬registrar', \ps¬alwaysaccers'
+      }, \concatall{\mathbf{t}'}, \mathbf{b}, \mathbf{u}
+    }\!\!\!\!\!\!\\
+    &\text{其中：}\\
+    &\ \begin{aligned}
+      \using \mathbf{s} &= \set{\build{
+        d_\wd¬serviceindex
+        }{
+          r \in \mathbf{r}, d \in r_\wr¬digests
+        }} \cup \keys{\mathbf{f}} \cup \set{\build{t_\dx¬dest}{t \in \mathbf{t}}} \\
+      \local¬acc(s) &\equiv \accone(\psX, \mathbf{t}, \mathbf{r}, \mathbf{f}, s) \\
+      \mathbf{u} &= \sq{\build{
+          \tup{s, \local¬acc(s)_\ao¬gasused}
+        }{
+          s \orderedin \mathbf{s}
+        }} \\
+      \mathbf{b} &= \set{\build{
+          \tup{s, b}
+        }{
+          s \in \mathbf{s},\,
+          b = \local¬acc(s)_\ao¬yield,\,
+          b \ne \none
+        }} \\
+      \mathbf{t}' &= \sq{\build{
+          \local¬acc(s)_\ao¬defxfers
+        }{
+          s \orderedin \mathbf{s}
+        }} \\
+      \ps¬accounts' &= \local¬fnprovide(
+        (\ps¬accounts \cup \mathbf{n}) \setminus \mathbf{m},
+        \bigcup_{s \in \mathbf{s}} \local¬acc(s)_\ao¬provisions
+      ) \\
+      &\tup{
+        \ps¬accounts, \ps¬stagingset, \ps¬authqueue, \ps¬manager, \ps¬assigners, \ps¬delegator, \ps¬registrar, \ps¬alwaysaccers
+      } = \psX \\
+      \local¬manpost &= \local¬acc(m)_\ao¬poststate \\
+      \tup{\ps¬manager'\!,\ps¬alwaysaccers'} &=
+        \local¬manpost_{\tup{\ps¬manager, \ps¬alwaysaccers}} \\
+      \forall c \in \coreindex :
+        \ps¬assigners'\sub{c} &= R(
+          \ps¬assigners\sub{c},
+          (\local¬manpost_\ps¬assigners)\sub{c},
+          ((\local¬acc(\ps¬assigners\sub{c})_\ao¬poststate)_\ps¬assigners)\sub{c}
+        ) \\
+      \ps¬delegator' &= R(
+        \ps¬delegator,
+        \local¬manpost_\ps¬delegator,
+        (\local¬acc(\ps¬delegator)_\ao¬poststate)_\ps¬delegator
+      ) \\
+      \ps¬registrar' &= R(
+        \ps¬registrar,
+        \local¬manpost_\ps¬registrar,
+        (\local¬acc(\ps¬registrar)_\ao¬poststate)_\ps¬registrar
+      ) \\
+      \ps¬stagingset' &= (
+          \local¬acc(\ps¬delegator)_\ao¬poststate
+      )_\ps¬stagingset \\
+      \forall c \in \coreindex :
+        \ps¬authqueue'\sub{c} &= ((
+          \local¬acc(\ps¬assigners\sub{c})_\ao¬poststate
+        )_\ps¬authqueue)\sub{c} \\
+      \mathbf{n} &= \bigcup_{s \in \mathbf{s}}(
+        (\local¬acc(s)_\ao¬poststate)_\ps¬accounts
+          \setminus
+        \keys{\ps¬accounts \setminus \set{s}}
+      ) \\
+      \mathbf{m} &= \bigcup_{s \in \mathbf{s}}(
+        \keys{\ps¬accounts}
+          \setminus
+        \keys{(\local¬acc(s)_\ao¬poststate)_\ps¬accounts}
+      )
+    \end{aligned}
+  \end{aligned}}
+\end{equation}
+\begin{equation}
+  R(o, a, b) \equiv \begin{cases}
+    b &\when a = o \\
+    a &\otherwise
+  \end{cases}
+\end{equation}
+\undef{\local¬acc}
+\undef{\local¬fnreplaceifchanged}
+
+以及 $\local¬fnprovide$ 是 preimage 集成函数，它将服务状态字典和 service/blob 对的集合转换为新的服务状态字典。对已不存在或相关请求被丢弃的服务的 preimage 提供将被忽略：
+\begin{align}
+  \local¬fnprovide &\colon\abracegroup{
+    &\tuple{\dictionary{\serviceid}{\serviceaccount}, \protoset{\tuple{\serviceid, \blob}}} \to \dictionary{\serviceid}{\serviceaccount} \\
+    &\tup{\mathbf{d}, \mathbf{p}} \mapsto \mathbf{d}'\;\where \mathbf{d}' = \mathbf{d}\;\text{除以下情况外：} \\
+    &\quad\forall \tup{s, \mathbf{i}} \in \mathbf{p},\;
+      \local¬fnprovidable(\mathbf{d}, s, \mathbf{i}):\\
+    &\qquad \mathbf{d}'\subb{s}_\sa¬requests\subb{\tup{\blake{\mathbf{i}}, \len{\mathbf{i}}}} =\sq{\thetime'}\\
+    &\qquad \mathbf{d}'\subb{s}_\sa¬preimages\subb{\blake{\mathbf{i}}} = \mathbf{i}
+  } \\
+  \local¬fnprovidable &\colon\abracegroup{
+    &\tuple{\dictionary{\serviceid}{\serviceaccount}, \serviceid, \blob} \to \bool \\
+    &\tup{\mathbf{d}, s, \mathbf{i}} \mapsto \begin{cases}
+      \mathbf{d}\subb{s}_\sa¬requests\subb{\tup{\blake{\mathbf{i}}, \len{\mathbf{i}}}} = \sq{} &\when s \in \keys{\mathbf{d}} \\
+      \bot &\otherwise
+    \end{cases}
+  }
+\end{align}
+
+我们注意到，在形成所有已更改的、新添加的服务和新移除的索引的并集时（在上述上下文中定义为 $\keys{\mathbf{n}} \cup \mathbf{m}$），不同的服务可能不会各自为新的、更改的或移除的服务贡献相同的索引。对于已移除和已更改的服务集合，这不会发生，因为可移除服务的代码哈希没有已知的 preimage，因此无法执行自身来进行更改。对于新服务，这也应该永远不会发生，因为新索引被明确选择以避免此类冲突。如果极不可能的情况确实发生，则该区块必须被视为无效。
+
+单服务累积函数 $\accone$ 将初始状态上下文、延迟转移序列、work-report 序列、享受免费累积的服务字典（值表示免费 gas 的量）和服务索引转换为更改后的状态上下文、\emph{transfer}（转移）序列、可能的累积输出、实际使用的 \textsc{pvm} gas 和 preimage 提供集合。此函数从一组 work-report 中整理特定服务的 work-digest 并使用所述数据调用 \textsc{pvm} 执行：
+\begin{equation}
+  \label{eq:acconeout}
+  \acconeout \equiv \tuple{
+    \begin{alignedat}{3}
+      \isa{\ao¬poststate&}{\partialstate},\;
+      \isa{&\ao¬defxfers&}{\defxfers},\;
+      \isa{\ao¬yield}{\optional{\hash}},\;\\
+      \isa{\ao¬gasused&}{\gas},\;
+      \isa{&\ao¬provisions&}{\protoset{\tuple{\serviceid, \blob}}}
+    \end{alignedat}
+  }
+\end{equation}
+\begin{align}
+  \label{eq:accone}
+  &\accone \colon \abracegroup[\;]{
+    &\begin{aligned}
+      \tuple{\begin{aligned}
+        &\partialstate, \defxfers, \workreports,\\
+        &\dictionary{\serviceid}{\gas}, \serviceid
+      \end{aligned}}
+      &\to \acconeout \\
+      \tup{\psX, \mathbf{t}, \mathbf{r}, \mathbf{f}, s} &\mapsto \Psi_A(\psX, \thetime', s, g, \mathbf{i}^T \!\!\concat \mathbf{i}^U)
+    \end{aligned} \\
+    &\text{其中：} \\
+    &\ \begin{aligned}
+      g &= \subifnone{\mathbf{f}\sub{s}, 0}
+        + \!\!\!\!\sum_{t \in \mathbf{t}, t_\dx¬dest = s}\!\!\!\!(t_\dx¬gas)
+        + \!\!\!\!\!\!\!\!\sum_{r \in \mathbf{r}, d \in r_\wr¬digests, d_\wd¬serviceindex = s}\!\!\!\!\!\!\!\!(d_\wd¬gaslimit) \\
+      \mathbf{i}^T &= \sq{\build{
+        t
+      }{
+        t \orderedin \mathbf{t}, t_\dx¬dest = s
+      }}\\
+      \mathbf{i}^U &= \sq{\build{
+        \tup{\begin{alignedat}{3}
+          \is{\ot¬result}{d_\wd¬result},\,
+          \is{\ot¬gaslimit}{d_\wd¬gaslimit},\,
+          \is{\ot¬payloadhash}{d_\wd¬payloadhash},\,
+          \is{&\ot¬authtrace\;&}{r_\wr¬authtrace&},\\
+          \is{\ot¬segroot}{(r_\wr¬avspec)_\as¬segroot},\,
+          \is{\ot¬packagehash}{(r_\wr¬avspec)_\as¬packagehash},\,
+          \is{&\ot¬authorizer\;&}{r_\wr¬authorizer&}
+        \end{alignedat}}
+      }{
+        \begin{alignedat}{2}
+          r& \orderedin \mathbf{r},&\\
+          d& \orderedin r_\wr¬digests,&\ d_\wd¬serviceindex = s
+        \end{alignedat}
+      }}
+    \end{aligned}
+  }\!\!\!\!
+\end{align}
+
+这利用了 $\wd¬gaslimit$，即由选定的延迟转移、work-report 和 gas 特权隐含的 gas 限制。
+
+\subsection{最终状态集成（Final State Integration）}
+
+给定顶层 $\accseq$ 的结果，我们可以定义后验状态 $\privileges'$、$\authqueue'$ 和 $\stagingset'$，以及服务账户的第一个中间状态 $\accountspostacc$ 和累积输出日志 $\lastaccout'$：
+\begin{align}
+  \nonumber
+  &\using g = \max\left(
+    \Cblockaccgas,
+    \Creportaccgas \cdot \Ccorecount + \textstyle \sum_{x \in \values{\alwaysaccers}}(x)
+  \right)\\
+  \nonumber
+  &\also \psX = \tup{
+    \is{\ps¬accounts}{\accountspre},
+    \is{\ps¬stagingset}{\stagingset},
+    \is{\ps¬authqueue}{\authqueue},
+    \is{\ps¬manager}{\manager},
+    \is{\ps¬assigners}{\assigners},
+    \is{\ps¬delegator}{\delegator},
+    \is{\ps¬registrar}{\registrar},
+    \is{\ps¬alwaysaccers}{\alwaysaccers}
+  }
+  \!\!\!\!\!\\
+  \label{eq:finalstateaccumulation}
+  &\tup{
+    \local¬numberofreportsaccumulated, \psX', \mathbf{b}, \local¬servicegasused, \local¬processedtransfers
+  } \equiv \accseq(g, \sq{}, \justbecameavailable^*, \psX, \alwaysaccers) \\
+  &\lastaccout' \equiv \sq{\tup{s, h} \in \mathbf{b}} \\
+  \label{eq:accountspostaccdef}
+  &\tup{
+    \is\ps¬accounts{\accountspostacc},
+    \is\ps¬stagingset{\stagingset'},
+    \is\ps¬authqueue{\authqueue'},
+    \is\ps¬manager{\manager'},
+    \is\ps¬assigners{\assigners'},
+    \is\ps¬delegator{\delegator'},
+    \is\ps¬registrar{\registrar'},
+    \is\ps¬alwaysaccers{\alwaysaccers'}
+  } \equiv \psX'
+  \!\!\!\!
+\end{align}
+
+从这个公式中，我们还得到了 $\local¬numberofreportsaccumulated$（累积的 work-report 总数）和 $\local¬servicegasused$（每个服务在累积过程中使用的 gas）。我们组合 $\accumulationstatistics$（我们的累积统计），它是一个从被累积的服务索引到整个累积过程中使用的 gas 量以及累积的 work-item 和转移数量的映射。形式化定义如下：
+\begin{align}
+  \label{eq:accumulationstatisticsspec}
+  &\accumulationstatistics \in \dictionary{\serviceid}{\tuple{\N, \N, \gas}} \\
+  \label{eq:accumulationstatisticsdef}
+  &\textstyle \accumulationstatistics \equiv \set{\build{
+    \kv{s}{S(s)}
+  }{
+    S(s) \ne \tup{0, 0, 0}
+  }}
+  \!\!\!\!\\
+  \nonumber
+  \where &S(s) \equiv \tup{N(s), T(s), G(s)} \\
+  \nonumber
+  \also &N(s) \equiv \len{\sq{\build{d}{
+    r \orderedin \justbecameavailable^*\sub{\dots n} ,
+    d \orderedin r_\wr¬digests ,
+    d_\wd¬serviceindex = s
+  }}} \\
+  \nonumber
+  \also &T(s) \equiv \len{\sq{\build{t}{
+    t \orderedin \local¬processedtransfers ,
+    t_\dx¬dest = s
+  }}} \\
+  \nonumber
+  \also &G(s) \equiv \sum_{\tup{s, u} \in \mathbf{u}}(u)
+\end{align}
+
+第二个中间状态 $\accountspostxfer$ 可以定义为所有累积服务的最新累积记录被更新：
+\begin{align}
+  \accountspostxfer &\equiv \set{ \build{ \kv{s}{a'} }{ \kv{s}{a} \in \accountspostacc }} \\
+  &\where a' = \begin{cases}
+    a \exc a'_\sa¬lastacc = \thetime' &\when s \in \keys{\accumulationstatistics} \\
+    a &\otherwise
+  \end{cases}
+\end{align}
+
+我们通过整合本区块中累积的那些 work-report 并移动先前状态中的项目（最旧的此类项目被完全丢弃）来定义就绪队列和累积映射的最终状态：
+\begin{align}
+  \accumulated'_{\Cepochlen - 1} &= \local¬fnsrmap(\justbecameavailable^*\sub{\dots n}) \\
+  \forall i \in \Nmax{\Cepochlen - 1}: \accumulated'\sub{i} &\equiv \accumulated\sub{i + 1} \\
+  \forall i \in \N_\Cepochlen : \cyclic{\ready'}\sub{m - i} &\equiv \begin{cases}
+    E(\justbecameavailable^Q, \accumulated'\sub{\Cepochlen - 1}) &\when i = 0 \\
+    \sq{} &\when 1 \le i < \thetime' - \thetime \\
+    E(\cyclic{\ready}\sub{m - i}, \accumulated'\sub{\Cepochlen - 1}) &\when i \ge \thetime' - \thetime
+  \end{cases}
+  \!\!\!\!
+\end{align}
+
+
+
+
+\subsection{Preimage 集成（Preimage Integration）}
+
+累积之后，我们必须集成查找外部交易中提供的所有 preimage，以得到后验账户状态。查找外部交易是一系列服务索引和数据的对。这些对必须有序且无重复（方程 \ref{eq:preimagesareordered} 要求这一点）。数据必须已被服务请求但在\emph{先前}状态中尚未提供。形式化定义如下：
+\begin{align}
+  \xtpreimages &\in \sequence{\tuple{ \serviceid,\, \blob }} \\
+  \label{eq:preimagesareordered}\xtpreimages &= \sqorderuniqby{i}{i \in \xtpreimages} \\
+  \forall \tup{\xp¬serviceindex, \xp¬data} &\in \xtpreimages : \local¬fnprovidable(\accountspre, \xp¬serviceindex, \xp¬data)
+\end{align}
+
+我们无偏见地忽略由于累积效果而不再有用的任何 preimage。我们将 $\accountspostpreimage$ 定义为集成仍然相关的 preimage 之后的状态：
+\begin{equation}
+  \accountspostpreimage = \local¬fnprovide(\accountspostxfer, \xtpreimages)
+\end{equation}

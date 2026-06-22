@@ -1,0 +1,384 @@
+\section{符号索引（Index of Notation）}\label{sec:definitions}
+
+\subsection{集合（Sets）}
+
+\subsubsection{常规符号（Regular Notation）}
+\begin{description}
+  \item[$\finitefield$] 有限域的集合。
+  \item[$\N$] 非负整数集合。下标表示最大值加一。参见第 \ref{sec:numbers} 节。
+  \begin{description}
+    \item[$\N^+$] 正整数集合（不包括零）。
+    \item[$\balance$] 余额值集合。等价于 $\Nbits{64}$。参见方程 \ref{eq:balance}。
+    \item[$\gas$] 无符号 gas 值集合。等价于 $\Nbits{64}$。参见方程 \ref{eq:gasregentry}。
+    \item[$\bloblength$] blob 长度值集合。等价于 $\Nbits{32}$。参见第 \ref{sec:numbers} 节。
+    \item[$\pvmreg$] 寄存器值集合。等价于 $\Nbits{64}$。参见方程 \ref{eq:gasregentry}。
+    \item[$\serviceid$] 服务索引的来源集合。等价于 $\Nbits{32}$。参见第 \ref{eq:serviceaccounts} 节。
+    \item[$\timeslot$] 时间槽值集合。等价于 $\Nbits{32}$。参见方程 \ref{eq:time}。
+  \end{description}
+  \item[$\mathbb{Q}$] 有理数集合。未使用。
+  \item[$\mathbb{Z}$] 整数集合。下标表示范围。参见第 \ref{sec:numbers} 节。
+  \begin{description}
+    \item[$\signedgas$] 有符号 gas 值集合。等价于 $\mathbb{Z}_{-2^{63}\dots2^{63}}$。参见方程 \ref{eq:gasregentry}。
+  \end{description}
+\end{description}
+
+\subsubsection{自定义符号（Custom Notation）}
+\begin{description}
+  \item[$\dictionary{K}{V}$] 将域 $k$ 部分双射到范围 $v$ 的字典集合。参见第 \ref{sec:dictionaries} 节。
+  \item[$\serviceaccount$] 服务 $\mathbb{A}$ 账户的集合。参见方程 \ref{eq:serviceaccount}。
+  \item[$\bitstring$] $\mathbb{B}$ itstring（布尔序列）集合。下标表示长度。参见第 \ref{sec:sequences} 节。
+  \item[$\blob$] $\mathbb{B}$ lob（八位字节序列）集合。下标表示长度。参见第 \ref{sec:sequences} 节。
+  \begin{description}
+    \item[$\blskey$] \textsc{bls} 公钥集合。$\blob[144]$ 的子集。参见第 \ref{sec:signing} 节。
+    \item[$\ringroot$] Bandersnatch 环根集合。$\blob[144]$ 的子集。参见第 \ref{sec:cryptography} 节和附录 \ref{sec:bandersnatch}。
+  \end{description}
+  \item[$\workcontext$] 工作 $\mathbb{C}$ 上下文集合。参见方程 \ref{eq:workcontext}。\emph{不用作复数集合。}
+  \item[$\workdigest$] 工作 $\mathbb{D}$ igest 集合。参见方程 \ref{eq:workdigest}。
+  \item[$\workerror$] 工作执行 $\mathbb{E}$ rror 集合。参见方程 \ref{eq:workerror}。
+  \item[$\guarantee$] 工作报告 $\mathbb{G}$ uarantee 集合。参见方程 \ref{eq:guarantee}。
+  \item[$\hash$] 32 八位字节密码值集合，等价于 $\blob[32]$。通常是 $\mathbb{H}$ ash 函数的结果。参见第 \ref{sec:cryptography} 节。
+  \begin{description}
+    \item[$\edkey$] Ed25519 公钥集合。$\blob[32]$ 的子集。参见第 \ref{sec:signing} 节。
+    \item[$\bskey$] Bandersnatch 公钥集合。$\blob[32]$ 的子集。参见第 \ref{sec:cryptography} 节和附录 \ref{sec:bandersnatch}。
+  \end{description}
+  \item[$\innerpvm$] 表示内部 \textsc{pvm} 实例状态的集合。参见方程 \ref{eq:innerpvm}。
+  \item[$\segment$] 数据段集合，等价于 $\blob[\Csegmentsize]$。参见方程 \ref{eq:segment}。
+  \item[$\valkey$] 验证者 $\mathbb{K}$ ey 集合。参见方程 \ref{eq:validatorkeys}。
+  \item[$\implications$] 表示累积隐含信息的集合。参见方程 \ref{eq:implications}。
+  \item[$\ram$] \textsc{pvm} $\mathbb{M}$ emory（\textsc{ram}）状态集合。参见方程 \ref{eq:pvmmemory}。
+  \item[$\acconeout$] 单服务累积 $\mathbb{O}$ utput 集合。参见方程 \ref{eq:acconeout}。
+  \item[$\workpackage$] 工作 $\mathbb{P}$ ackage 集合。参见方程 \ref{eq:workpackage}。
+  \item[$\workreport$] 工作 $\mathbb{R}$ eport 集合。参见方程 \ref{eq:workreport}。\emph{不用作实数集合。}
+  \item[$\partialstate$] 表示整体 $\mathbb{S}$ tate 的一部分的集合，用于累积期间。参见方程 \ref{eq:partialstate}。
+  \item[$\safroleticket$] 时隙密封 $\mathbb{T}$ icket 集合。参见方程 \ref{eq:ticket}。
+  \item[$\operandtuple$] 关于准备为累积函数操作数的单个 work-item 的信息。参见方程 \ref{eq:operandtuple}。
+  \item[$\valcount$] $\mathbb{V}$ alidator 密钥集大小集合。参见方程 \ref{eq:valcount}。
+  \item[$\readable{\memory}$] \textsc{pvm} \textsc{ram} $\memory$ 的 $\mathbb{V}$ alidly 可读索引集合。参见附录 \ref{sec:virtualmachine}。
+  \item[$\writable{\memory}$] \textsc{pvm} \textsc{ram} $\memory$ 的 $\mathbb{V}$ alidly 可写索引集合。参见附录 \ref{sec:virtualmachine}。
+  \item[$\edsignature{k}{m}$] 密钥 $k$ 和消息 $m$ 的 $\mathbb{V}$ alid Ed25519 签名集合。$\blob[64]$ 的子集。参见第 \ref{sec:cryptography} 节。
+  \item[$\bssignature{k}{c}{m}$] 公钥 $k$、上下文 $c$ 和消息 $m$ 的 $\mathbb{V}$ alid Bandersnatch 签名集合。$\blob[96]$ 的子集。参见第 \ref{sec:cryptography} 节。
+  \item[$\bsringproof{r}{c}{m}$] 根 $r$、上下文 $c$ 和消息 $m$ 的 $\mathbb{V}$ alid Bandersnatch Ring\textsc{vrf} 证明集合。$\blob[784]$ 的子集。参见第 \ref{sec:cryptography} 节。
+  \item[$\workitem$] $\mathbb{W}$ ork item 集合。参见方程 \ref{eq:workitem}。
+  \item[$\defxfer$] 延迟转移集合。参见方程 \ref{eq:defxfer}。
+  \item[$\avspec$] 可用性规范集合。参见方程 \ref{eq:avspec}。
+\end{description}
+
+\subsection{函数（Functions）}
+
+\begin{description}
+%  \item[$\Gamma$] 未使用。
+  \item[$\accumulate$] 累积函数（参见第 \ref{sec:accumulationexecution} 节）：
+  \begin{description}
+    \item[$\accone$] 单步累积函数。参见方程 \ref{eq:accone}。
+    \item[$\accpar$] 并行累积函数。参见方程 \ref{eq:accpar}。
+    \item[$\accseq$] 完整顺序累积函数。参见方程 \ref{eq:accseq}。
+  \end{description}
+%  \item[$\gascounter$] 未使用。
+%  \item[$\Pi$] 未使用。
+  \item[$\histlookup$] 历史查找函数。参见方程 \ref{eq:historicallookup}。
+  \item[$\computereport$] 工作报告计算函数。参见方程 \ref{eq:computereport}。
+  \item[$\makebundle$] 包组装函数。参见方程 \ref{eq:makebundle}。
+  \item[$\transitionstate$] 通用状态转换函数。参见方程 \ref{eq:statetransition}、\ref{eq:transitionfunctioncomposition}。
+%  \item[$\Sigma$] 未使用。
+  \item[$\Phi$] 密钥空化函数。参见方程 \ref{eq:blacklistfilter}。
+  \item[$\Psi$] 整体程序 \textsc{pvm} 机器状态转换函数。参见方程 \ref{sec:virtualmachine}。
+  \begin{description}
+    \item[$\Psi_1$] 单步（\textsc{pvm}）机器状态转换函数。参见附录 \ref{sec:virtualmachine}。
+    \item[$\Psi_A$] Accumulate \textsc{pvm} 调用函数。参见附录 \ref{sec:virtualmachineinvocations}。
+    \item[$\Psi_H$] 带宿主函数编排的宿主函数调用（\textsc{pvm}）。参见附录 \ref{sec:virtualmachine}。
+    \item[$\Psi_I$] Is-Authorized \textsc{pvm} 调用函数。参见附录 \ref{sec:virtualmachineinvocations}。
+    \item[$\Psi_M$] 编排整体程序 \textsc{pvm} 机器状态转换函数。参见附录 \ref{sec:virtualmachine}。
+    \item[$\Psi_R$] Refine \textsc{pvm} 调用函数。参见附录 \ref{sec:virtualmachineinvocations}。
+  \end{description}
+  \item[$\Omega$] 虚拟机宿主调用函数。参见附录 \ref{sec:virtualmachineinvocations}。
+  \begin{description}
+    \item[$\Omega_A$] Assign-core 宿主调用。
+    \item[$\Omega_B$] Empower-service 宿主调用。
+    \item[$\Omega_C$] Checkpoint 宿主调用。
+    \item[$\Omega_D$] Designate-validators 宿主调用。
+    \item[$\Omega_E$] Export segment 宿主调用。
+    \item[$\Omega_F$] Forget-preimage 宿主调用。
+    \item[$\Omega_G$] Gas-remaining 宿主调用。
+    \item[$\Omega_H$] Historical-lookup-preimage 宿主调用。
+    \item[$\Omega_I$] Information-on-service 宿主调用。
+    \item[$\Omega_J$] Eject-service 宿主调用。
+    \item[$\Omega_K$] Kickoff-\textsc{pvm} 宿主调用。
+    \item[$\Omega_L$] Lookup-preimage 宿主调用。
+    \item[$\Omega_M$] Make-\textsc{pvm} 宿主调用。
+    \item[$\Omega_N$] New-service 宿主调用。
+    \item[$\Omega_O$] Poke-\textsc{pvm} 宿主调用。
+    \item[$\Omega_P$] Peek-\textsc{pvm} 宿主调用。
+    \item[$\Omega_Q$] Query-preimage 宿主调用。
+    \item[$\Omega_R$] Read-storage 宿主调用。
+    \item[$\Omega_S$] Solicit-preimage 宿主调用。
+    \item[$\Omega_T$] Transfer 宿主调用。
+    \item[$\Omega_U$] Upgrade-service 宿主调用。
+    \item[$\Omega_W$] Write-storage 宿主调用。
+    \item[$\Omega_X$] Expunge-\textsc{pvm} 宿主调用。
+    \item[$\Omega_Y$] Fetch data 宿主调用。
+    \item[$\Omega_Z$] Pages inner-\textsc{pvm} memory 宿主调用。
+    \item[$\Omega_\Taurus$] Yield accumulation trie result 宿主调用。
+    \item[$\Omega_\Aries$] Provide preimage 宿主调用。
+    \item[$\Omega_\Gemini$] Grow heap 宿主调用。
+  \end{description}
+\end{description}
+
+\subsection{工具函数、外部函数和标准函数（Utilities, Externalities and Standard Functions）}
+
+\begin{description}
+  \item[$\fnmmrappend(\dots)$] Merkle mountain range 追加函数。参见方程 \ref{eq:mmrappend}。
+  \item[$\fnoctetstobits\sub{n}(\dots)$] $n$ 个八位字节的八位字节转比特函数。上标 ${}^{-1}$ 表示逆函数。参见方程 \ref{eq:bitsfunc}。
+  \item[$\erasurecode{v}{n}{\dots}$] $v$ 个验证者和 $n$ 个片段的擦除编码函数。参见方程 \ref{eq:erasurecoding}。
+  \item[$\fnecoriginalshards(\dots)$] 原始分片计数函数。参见方程 \ref{eq:ecoriginalshards}。
+  \item[$\encode{\dots}$] 八位字节序列编码函数。上标 ${}^{-1}$ 表示逆函数。参见附录 \ref{sec:serialization}。
+  \item[$\fnfyshuffle(\dots)$] Fisher-Yates 洗牌函数。参见方程 \ref{eq:suffle}。
+  \item[$\fnmemgas(L, \ell)$] 内存大小 gas 函数。参见方程 \ref{eq:fnmemgas}。
+  \item[$\blake{\dots}$] Blake 2b 256 位哈希函数。参见第 \ref{sec:cryptography} 节。
+  \item[$\keccak{\dots}$] Keccak 256 位哈希函数。参见第 \ref{sec:cryptography} 节。
+
+  \item[$\fnmerklejustsubpath{x}(\dots)$] 恒定深度 Merkle 树中特定 $2^x$ 大小页面的证明路径。参见方程 \ref{eq:constantdepthsubtreemerklejust}。
+  \item[$\keys{\dots}$] 字典的域或键集合。参见第 \ref{sec:dictionaries} 节。
+  \item[$\fnmerklesubtreepage{x}(\dots)$] 恒定深度 Merkle 树的 $2^x$ 大小页面函数。参见方程 \ref{eq:constantdepthsubtreemerkleleafpage}。
+  \item[$\merklizecd{\dots}$] 恒定深度二叉 Merklization 函数。参见附录 \ref{sec:merklization}。
+  \item[$\merklizewb{\dots}$] 平衡二叉 Merklization 函数。参见附录 \ref{sec:merklization}。
+  \item[$\merklizestate{\dots}$] 状态 Merklization 函数。参见附录 \ref{sec:statemerklization}。
+
+  \item[$\getringroot{\dots}$] Bandersnatch 环根函数。参见第 \ref{sec:cryptography} 节和附录 \ref{sec:bandersnatch}。
+  \item[$\zeropad{n}{\dots}$] 八位字节数组零填充函数。参见方程 \ref{eq:zeropadding}。
+  \item[$\seqfromhash{}{\dots}$] 从哈希生成数值序列的函数。参见方程 \ref{eq:sequencefromhash}。
+  \item[$\ecrecover{v}{n}{\dots}$] $v$ 个验证者和 $n$ 个片段的擦除编码恢复函数。参见方程 \ref{eq:erasurecodinginv}。
+  \item[$\edsigndata{k}{\dots}$] Ed25519 签名函数。参见第 \ref{sec:cryptography} 节。
+  \item[$\blssigndata{k}{\dots}$] \textsc{bls} 签名函数。参见第 \ref{sec:cryptography} 节。
+  \item[$\wallclock$] 以 Jam 纪元开始后秒数表示的当前时间。参见第 \ref{sec:commonera} 节。
+  \item[$\subifnone{\dots}$] 空值替换函数。参见方程 \ref{eq:substituteifnothing}。
+  \item[$\values{\dots}$] 字典或序列的范围或值集合。参见第 \ref{sec:dictionaries} 节。
+  \item[$\sext{n}{\dots}$] $\Nbits{8n}$ 中值的符号扩展函数。参见方程 \ref{eq:signedextension}。
+  \item[$\banderout{\dots}$] Bandersnatch \textsc{vrf} 签名/证明的别名/输出/熵函数。参见第 \ref{sec:cryptography} 节和附录 \ref{sec:bandersnatch}。
+  \item[$\fntosigned{n}(\dots)$] $\Nbits{8n}$ 中值的转有符号函数。上标 ${}^{-1}$ 表示逆函数。参见方程 \ref{eq:signedfunc}。
+\end{description}
+
+\subsection{值（Values）}
+
+\subsubsection{区块上下文项（Block-context Terms）}
+
+这些项全部以单个区块为上下文。它们可以用其他项作为上标来更改上下文并引用其他区块。
+\begin{description}
+  \item[$\ancestors$] 区块的祖先集合。参见方程 \ref{eq:ancestors}。
+  \item[$\block$] 区块。参见方程 \ref{eq:block}。
+  \item[$\extrinsic$] 区块外部交易。参见方程 \ref{eq:extrinsic}。
+  \item[$\accoutcommitment{v}$] 验证者 $v$ 的 \textsc{Beefy} 签名承诺。参见方程 \ref{eq:accoutsignedcommitment}。
+  \item[$\reporters$] 做出工作报告的 Ed25519 guarantor 密钥集合。参见方程 \ref{eq:guarantorsig}。
+  \item[$\header$] 区块头部。参见方程 \ref{eq:header}。
+  \item[$\accumulationstatistics$] 本区块的服务索引累积统计。参见方程 \ref{eq:accumulationstatisticsspec} 和 \ref{eq:accumulationstatisticsdef}。
+  \item[$\guarantorassignments$] 当前核心分配。参见第 \ref{sec:coresandvalidators} 节。
+  \item[$\guarantorassignmentsunderlastrotation$] 上一次轮换中的核心分配。参见第 \ref{sec:coresandvalidators} 节。
+  \item[$\justbecameavailable$] 现已变为可用且准备好进行累积的 work-report 序列。参见方程 \ref{eq:availableworkreports}。
+  \item[$\isticketed$] 票证条件，如果区块是用票证签名而非回退机制密封的则为真。参见方程 \ref{eq:ticketconditiontrue} 和 \ref{eq:ticketconditionfalse}。
+  \item[$\isaudited$] 审计条件，一旦区块被审计则等于 $\top$。参见第 \ref{sec:auditing} 节。
+\end{description}
+
+不带任何上标时，区块假定为正在导入的区块，或者如果没有正在导入的区块，则为最佳链的头部（参见第 \ref{sec:bestchain} 节）。显式的区块上下文化上标包括：
+\begin{description}
+  \item[$\block^\natural$] 最新已最终确认的区块。参见方程 \ref{sec:bestchain}。
+  \item[$\block^\flat$] 最佳链头部的区块。参见方程 \ref{sec:bestchain}。
+\end{description}
+
+\subsubsection{状态组件（State components）}
+
+此处，撇号注释表示后验状态。各个组件可以用字母下标来标识。
+\begin{description}
+  \item[$\authpool$] 核心 $\authpool$ uthorization 池。参见方程 \ref{eq:authstatecomposition}。
+  \item[$\recent$] 最近活动日志。参见方程 \ref{eq:recentspec}。
+  \begin{description}
+    \item[$\recenthistory$] 最近区块的信息。参见方程 \ref{eq:recenthistoryspec}。
+    \item[$\accoutbelt$] 用于累积 Accumulation 输出的 Merkle mountain belt。参见方程 \ref{eq:accoutbeltspec} 和 \ref{eq:accoutbeltdef}。
+  \end{description}
+  \item[$\safrole$] 与 Safrole 相关的状态。参见方程 \ref{eq:consensusstatecomposition}。
+  \begin{description}
+    \item[$\ticketaccumulator$] 密封彩票累加器。参见方程 \ref{eq:ticketaccumulatorsealticketsspec}。
+    \item[$\pendingset$] 下一纪元验证者的密钥，等价于构成 $\epochroot$ 的那些密钥。参见方程 \ref{eq:validatorkeys}。
+    \item[$\sealtickets$] 当前纪元的时隙密封序列。参见方程 \ref{eq:ticketaccumulatorsealticketsspec}。
+    \item[$\epochroot$] 当前纪元票证提交的 Bandersnatch 根。参见方程 \ref{eq:epochrootspec}。
+  \end{description}
+  \item[$\accountspre$] 服务账户的（先前）状态。参见方程 \ref{eq:serviceaccounts}。
+  \begin{description}
+    \item[$\accountspostacc$] 累积后、preimage 集成前的中间状态。参见方程 \ref{eq:accountspostaccdef}。
+  \end{description}
+  \item[$\entropy$] 熵累加器和纪元随机性。参见方程 \ref{eq:entropycomposition}。
+  \item[$\stagingset$] 下一个要使用的验证者密钥和元数据。参见方程 \ref{eq:validatorkeys}。
+  \item[$\activeset$] 当前活跃的验证者密钥和元数据。参见方程 \ref{eq:validatorkeys}。
+  \item[$\previousset$] 上一纪元活跃的验证者密钥和元数据。参见方程 \ref{eq:validatorkeys}。
+  \item[$\availassignments$] 可用性分配。核心的可用性分配是在累积之前正在变为可用的 work-report 保证。参见方程 \ref{eq:reportingstate}。
+  \begin{description}
+    \item[$\availassignmentspostjudgment$] 判断后、assurance 外部交易前的中间状态。参见方程 \ref{eq:removenonpositive}。
+    \item[$\availassignmentspostassurances$] assurance 外部交易后、guarantee 外部交易前的中间状态。参见方程 \ref{eq:availassignmentspostassurancesdef}。
+  \end{description}
+  \item[$\thestate$] 系统的整体状态。参见方程 \ref{eq:statetransition}、\ref{eq:statecomposition}。
+  \item[$\thetime$] 最新区块的时间槽。参见方程 \ref{eq:timeslotindex}。
+  \item[$\authqueue$] 授权队列。参见方程 \ref{eq:authstatecomposition}。
+  \item[$\disputes$] 关于 work-report 和验证者的过去判断。参见方程 \ref{eq:disputesspec}。
+  \begin{description}
+    \item[$\badset$] 被判定为不正确的 work-report。参见方程 \ref{eq:badsetdef}。
+    \item[$\goodset$] 被判定为正确的 work-report。参见方程 \ref{eq:goodsetdef}。
+    \item[$\wonkyset$] 有效性被判定为不可知的 work-report。参见方程 \ref{eq:wonkysetdef}。
+    \item[$\offenders$] 做出被认定为不正确的判断的验证者。参见方程 \ref{eq:offendersdef}。
+  \end{description}
+  \item[$\privileges$] 特权服务索引。参见方程 \ref{eq:privilegesspec}。
+  \begin{description}
+    \item[$\manager$] 受祝福服务的索引。参见方程 \ref{eq:accountspostaccdef}。
+    \item[$\assigners$] 能够分配每个核心授权器队列的服务索引。参见方程 \ref{eq:accountspostaccdef}。
+    \item[$\delegator$] 指定服务的索引。参见方程 \ref{eq:accountspostaccdef}。
+    \item[$\registrar$] 注册服务的索引。参见方程 \ref{eq:accountspostaccdef}。
+    \item[$\alwaysaccers$] 始终累积服务的索引及其基本 gas 配额。参见方程 \ref{eq:accountspostaccdef}。
+  \end{description}
+  \item[$\activity$] 验证者的活动统计。参见方程 \ref{eq:activityspec}。
+  \item[$\ready$] 累积队列。参见方程 \ref{eq:readyspec}。
+  \item[$\accumulated$] 累积历史。参见方程 \ref{eq:accumulatedspec}。
+  \item[$\lastaccout$] 最近的 Accumulation 输出。参见方程 \ref{eq:lastaccoutspec} 和 \ref{eq:finalstateaccumulation}。
+\end{description}
+
+\subsubsection{虚拟机组件（Virtual Machine components）}
+
+\begin{description}
+  \item[$\varepsilon$] 所有机器状态转换产生的退出原因。
+  \item[$\nu$] 指令的立即值。
+  \item[$\memory$] 内存序列；集合 $\ram$ 的成员。
+  \item[$\gascounter$] Gas 计数器。
+  \item[$\registers$] 寄存器。
+  \item[$\zeta$] 指令序列。
+  \item[$\varpi$] 程序的基本块序列。
+  \item[$\imath$] 指令计数器。
+\end{description}
+
+\subsubsection{常量（Constants）}
+
+\begin{description}
+  \item[$\Ctrancheseconds = 8$] 审计批次之间的周期（以秒计）。参见第 \ref{sec:auditselection} 节。
+  \item[$\Citemdeposit = 10$] 每个可选服务状态项目所需的额外最低余额。参见方程 \ref{eq:deposits}。
+  \item[$\Cbytedeposit = 1$] 每个八位字节可选服务状态所需的额外最低余额。参见方程 \ref{eq:deposits}。
+  \item[$\Cbasedeposit = 100$] 所有服务需要的基本最低余额。参见方程 \ref{eq:deposits}。
+  \item[$\Ccorecount = 341$] 核心总数。
+  \item[$\Cexpungeperiod = 19,200$] 未引用的 preimage 可被清除的时间槽周期。参见第 \ref{sec:accumulatefunctions} 节中的 \texttt{eject} 定义。
+  \item[$\Cepochlen = 600$] 纪元长度（以时间槽计）。参见第 \ref{sec:epochsandslots} 节。
+  \item[$\Cauditbiasfactor = 2$] 审计偏差因子，即在前一批次中每次缺席后，在下一批次中预计额外审计 work-report 的验证者数量。参见方程 \ref{eq:latertranches}。
+  \item[$\Creportaccgas = 10,000,000$] 调用 work-report Accumulation 逻辑分配的 gas。
+  \item[$\Cpackageauthgas = 50,000,000$] 调用 work-package Is-Authorized 逻辑分配的 gas。
+  \item[$\Cpackagerefgas = 5,000,000,000$] 调用 work-package Refine 逻辑分配的 gas。
+  \item[$\Cblockaccgas = 3,500,000,000$] 所有 Accumulation 的总 gas 分配。不应小于 $\Creportaccgas\cdot\Ccorecount + \sum_{g \in \values{\alwaysaccers}}(g)$。
+  \item[$\Crecenthistorylen = 8$] 最近历史的大小（以区块计）。参见方程 \ref{eq:recenthistorydef}。
+  \item[$\Cmaxpackageitems = 16$] 包中的最大 work-item 数量。参见方程 \ref{eq:workreport} 和 \ref{eq:workpackage}。
+  \item[$\Cmaxreportdeps = 8$] work-report 中依赖项的最大总和。参见方程 \ref{eq:limitreportdeps}。
+  \item[$\Cmaxblocktickets = 16$] 单个外部交易中可提交的最大票证数。参见方程 \ref{eq:enforceticketlimit}。
+  \item[$\Cmaxlookupanchorage = 14,400$] 查找锚点的最大时间槽年龄。参见方程 \ref{eq:limitlookupanchorage}。
+  \item[$\mathsf{M}$] 宿主函数 gas 成本，见下文。
+  \item[$\Cmaxextrinsicverdicts = 16$] 单个外部交易中可包含的最大裁决数。参见方程 \ref{eq:disputesextrinsics}。
+  \item[$\Cmaxextrinsicoffenses = 16$] 单个外部交易中可包含的罪魁祸首或故障的最大数量。参见方程 \ref{eq:disputesextrinsics}。
+  \item[$\Cauthpoolsize = 8$] 授权池中的最大项目数。参见方程 \ref{eq:authstatecomposition}。
+  \item[$\Cslotseconds = 6$] 时隙周期（以秒计）。参见方程 \ref{sec:epochsandslots}。
+  \item[$\Cauthqueuesize = 80$] 授权队列中的项目数。参见方程 \ref{eq:authstatecomposition}。
+  \item[$\Crotationperiod = 10$] 验证者-核心分配的轮换周期（以时间槽计）。参见第 \ref{sec:coresandvalidators} 和 \ref{sec:workreportguarantees} 节。
+  \item[$\Cminpublicindex = 2^{16}$] 最小公开服务索引。低于此索引的服务只能由 Registrar 创建。参见方程 \ref{eq:newserviceindex}。
+  \item[$\Cmaxpackagexts = 128$] work-package 中的最大外部交易数。参见方程 \ref{eq:limitworkpackagebandwidth}。
+  \item[$\Cassurancetimeoutperiod = 5$] 已报告但不可用的工作被清除的时间槽周期。参见方程 \ref{eq:availassignmentspostassurancesdef}。
+  \item[$\Cmaxauthcodesize = 64,000$] is-authorized 代码的最大大小（以八位字节计）。参见方程 \ref{eq:isauthinvocation}。
+  \item[$\Cmaxbundlesize = 13,791,360$] work-package 的可变大小 blob、外部交易和导入段的最大拼接大小（以八位字节计）。参见方程 \ref{eq:checkextractsize}。
+  \item[$\Cmaxservicecodesize = 4,000,000$] 服务代码的最大大小（以八位字节计）。参见方程 \ref{eq:refinvocation}、\ref{eq:accinvocation} 和 \ref{eq:onxferinvocation}。
+  \item[$\Csegmentsize = 4104$] 段的大小（以八位字节计）。参见第 \ref{sec:segments} 节。
+  \item[$\Csegmentfootprint = \Csegmentsize + 32\ceil{\log_2(\Cmaxpackageexports)} = 4488$] 单个导入段在审计 DA 中的额外占用。参见方程 \ref{eq:segmentfootprint}。
+  \item[$\Cmaxpackageimports = 3,072$] work-package 中的最大导入数。参见方程 \ref{eq:limitworkpackagebandwidth}。
+  \item[$\Cmaxreportvarsize = 48\cdot2^{10}$] work-report 中所有无界 blob 的最大总大小（以八位字节计）。参见方程 \ref{eq:limitworkreportsize}。
+  \item[$\Cmemosize = 128$] 转移备忘录的大小（以八位字节计）。参见方程 \ref{eq:defxfer}。
+  \item[$\Cmaxpackageexports = 3,072$] work-package 中的最大导出数。参见方程 \ref{eq:limitworkpackagebandwidth}。
+  \item[$\mathsf{X}$] 上下文字符串，见下文。
+  \item[$\Cepochtailstart = 500$] 纪元中票证提交结束的时隙数。参见第 \ref{sec:slotkeysequence}、\ref{sec:epochmarker} 和 \ref{sec:safrolextandtickets} 节。
+  \item[$\Cpvmdynaddralign = 2$] \textsc{pvm} 动态地址对齐因子。参见方程 \ref{eq:jumptablealignment}。
+  \item[$\Cpvminitinputsize = 2^{24}$] 标准 \textsc{pvm} 程序初始化输入数据大小。参见方程 \ref{sec:standardprograminit}。
+  \item[$\Cpvmpagesize = 2^{12}$] \textsc{pvm} 内存页大小。参见方程 \ref{eq:pvmmemory}。
+  \item[$\Cpvminitzonesize = 2^{16}$] 标准 \textsc{pvm} 程序初始化区域大小。参见第 \ref{sec:standardprograminit} 节。
+\end{description}
+
+\subsubsection{宿主函数 Gas 成本（Host-function gas costs）}
+
+这些常量用于附录 \ref{sec:virtualmachineinvocations} 中的宿主函数 gas 成本方程。宿主函数 $\Omega_\square$ 的常数项记为 $\mathsf{M}_{\square,c}$，如果没有其他项则简单记为 $\mathsf{M}_\square$。八位字节线性项（如果有的话）记为 $\mathsf{M}_{\square,\ell}$，指定每 1024 个八位字节的 gas。页面线性项（同样可选）记为 $\mathsf{M}_{\square,p}$，指定每页的 gas。常数项为 $c$、八位字节线性项为 $L$、$\ell$ 个八位字节的宿主调用的 gas 为 $c + \fnmemgas(L, \ell)$（参见方程 \ref{eq:fnmemgas}）。
+
+\begin{description}
+  \item[$\Cgasunknown = 1000$] 未知宿主调用收取的 gas 成本。
+  \item[$\CgasA = 1818$] $\Omega_A$（\texttt{assign}）基本 gas 成本。
+  \item[$\CgasBconst = 422$] $\Omega_B$（\texttt{bless}）基本 gas 成本。
+  \item[$\CgasBlinear = 20$] $\Omega_B$（\texttt{bless}）每项 gas。
+  \item[$\CgasC = 103$] $\Omega_C$（\texttt{checkpoint}）基本 gas 成本。
+  \item[$\CgasDconst = 1100$] $\Omega_D$（\texttt{designate}）基本 gas 成本。
+  \item[$\CgasDlinear = 302$] $\Omega_D$（\texttt{designate}）每个验证者 gas。
+  \item[$\CgasE = 3521$] $\Omega_E$（\texttt{export}）基本 gas 成本。
+  \item[$\CgasF = 3250$] $\Omega_F$（\texttt{forget}）基本 gas 成本。
+  \item[$\CgasG = 48$] $\Omega_G$（\texttt{gas}）基本 gas 成本。
+  \item[$\CgasHconst = 1125$] $\Omega_H$（\texttt{historical\_lookup}）基本 gas 成本。
+  \item[$\CgasHlinear = 264$] $\Omega_H$（\texttt{historical\_lookup}）每 1024 八位字节 gas（$\fnmemgas(\CgasHlinear, \ell)$）。
+  \item[$\CgasI = 703$] $\Omega_I$（\texttt{info}）基本 gas 成本。
+  \item[$\CgasJ = 458$] $\Omega_J$（\texttt{eject}）基本 gas 成本。
+  \item[$\CgasK = 968$] $\Omega_K$（\texttt{invoke}）基本 gas 成本。
+  \item[$\CgasLconst = 600$] $\Omega_L$（\texttt{lookup}）基本 gas 成本。
+  \item[$\CgasLlinear = 248$] $\Omega_L$（\texttt{lookup}）每 1024 八位字节 gas（$\fnmemgas(\CgasLlinear, \ell)$）。
+  \item[$\CgasMconst = 1862$] $\Omega_M$（\texttt{machine}）基本 gas 成本。
+  \item[$\CgasMlinear = 112$] $\Omega_M$（\texttt{machine}）每 1024 八位字节 gas，程序大小（$\fnmemgas(\CgasMlinear, \ell)$）。
+  \item[$\CgasN = 3855$] $\Omega_N$（\texttt{new}）基本 gas 成本。
+  \item[$\CgasOconst = 297$] $\Omega_O$（\texttt{poke}）基本 gas 成本。
+  \item[$\CgasOlinear = 224$] $\Omega_O$（\texttt{poke}）每 1024 八位字节 gas（$\fnmemgas(\CgasOlinear, \ell)$）。
+  \item[$\CgasPconst = 377$] $\Omega_P$（\texttt{peek}）基本 gas 成本。
+  \item[$\CgasPlinear = 336$] $\Omega_P$（\texttt{peek}）每 1024 八位字节 gas（$\fnmemgas(\CgasPlinear, \ell)$）。
+  \item[$\CgasQ = 643$] $\Omega_Q$（\texttt{query}）基本 gas 成本。
+  \item[$\CgasRconst = 2407$] $\Omega_R$（\texttt{read}）基本 gas 成本。
+  \item[$\CgasRkeylinear = 1736$] $\Omega_R$（\texttt{read}）键每 1024 八位字节 gas（$\fnmemgas(\CgasRkeylinear, \ell)$）。
+  \item[$\CgasRvallinear = 248$] $\Omega_R$（\texttt{read}）值每 1024 八位字节 gas（$\fnmemgas(\CgasRvallinear, \ell)$）。
+  \item[$\CgasS = 2193$] $\Omega_S$（\texttt{solicit}）基本 gas 成本。
+  \item[$\CgasT = 575$] $\Omega_T$（\texttt{transfer}）基本 gas 成本。
+  \item[$\CgasU = 1028$] $\Omega_U$（\texttt{upgrade}）基本 gas 成本。
+  \item[$\CgasWconst = 2442$] $\Omega_W$（\texttt{write}）基本 gas 成本。
+  \item[$\CgasWvallinear = 216$] $\Omega_W$（\texttt{write}）每 1024 八位字节 gas（$\fnmemgas(\CgasWvallinear, \ell)$）。
+  \item[$\CgasWkeylinear = 3358$] $\Omega_W$（\texttt{write}）键每 1024 八位字节 gas（$\fnmemgas(\CgasWkeylinear, \ell)$）。
+  \item[$\CgasX = 335$] $\Omega_X$（\texttt{expunge}）基本 gas 成本。
+  \item[$\CgasYc{0} = 390, \CgasYl{0} = 0$] $\Omega_Y$（\texttt{fetch}）情况 0：协议参数。
+  \item[$\CgasYc{1} = 103, \CgasYl{1} = 0$] $\Omega_Y$（\texttt{fetch}）情况 1：熵。
+  \item[$\CgasYc{2} = 80, \CgasYl{2} = 96$] $\Omega_Y$（\texttt{fetch}）情况 2：auth trace。
+  \item[$\CgasYc{3} = 85, \CgasYl{3} = 96$] $\Omega_Y$（\texttt{fetch}）情况 3：任意外部交易（按索引）。
+  \item[$\CgasYc{4} = 85, \CgasYl{4} = 96$] $\Omega_Y$（\texttt{fetch}）情况 4：我们的外部交易（按索引）。
+  \item[$\CgasYc{5} = 171, \CgasYl{5} = 0$] $\Omega_Y$（\texttt{fetch}）情况 5：任意导入（按索引）。
+  \item[$\CgasYc{6} = 171, \CgasYl{6} = 0$] $\Omega_Y$（\texttt{fetch}）情况 6：我们的导入（按索引）。
+  \item[$\CgasYc{7} = 85, \CgasYl{7} = 96$] $\Omega_Y$（\texttt{fetch}）情况 7：编码的 work-package。
+  \item[$\CgasYc{8} = 84, \CgasYl{8} = 0$] $\Omega_Y$（\texttt{fetch}）情况 8：auth 配置。
+  \item[$\CgasYc{9} = 88, \CgasYl{9} = 0$] $\Omega_Y$（\texttt{fetch}）情况 9：auth 令牌。
+  \item[$\CgasYc{10} = 111, \CgasYl{10} = 0$] $\Omega_Y$（\texttt{fetch}）情况 10：精炼上下文。
+  \item[$\CgasYc{11} = 317, \CgasYl{11} = 0$] $\Omega_Y$（\texttt{fetch}）情况 11：项目摘要。
+  \item[$\CgasYc{12} = 250, \CgasYl{12} = 0$] $\Omega_Y$（\texttt{fetch}）情况 12：任意项目摘要。
+  \item[$\CgasYc{13} = 95, \CgasYl{13} = 96$] $\Omega_Y$（\texttt{fetch}）情况 13：任意有效载荷。
+  \item[$\CgasYc{14} = 287, \CgasYl{14} = 400$] $\Omega_Y$（\texttt{fetch}）情况 14：累积项目。
+  \item[$\CgasYc{15} = 355, \CgasYl{15} = 344$] $\Omega_Y$（\texttt{fetch}）情况 15：任意累积项目。
+  \item[$\CgasYc{\none} = 80, \CgasYl{\none} = 0$] $\Omega_Y$（\texttt{fetch}）其他情况：无。
+  \item[$\CgasZallocconst = 275$] $\Omega_Z$（\texttt{pages}）分配基本 gas 成本。
+  \item[$\CgasZalloclinear = 121$] $\Omega_Z$（\texttt{pages}）分配每页 gas。
+  \item[$\CgasZfreeconst = 212$] $\Omega_Z$（\texttt{pages}）释放基本 gas 成本。
+  \item[$\CgasZfreelinear = 118$] $\Omega_Z$（\texttt{pages}）释放每页 gas。
+  \item[$\CgasZsetmodeconst = 130$] $\Omega_Z$（\texttt{pages}）setmode 基本 gas 成本。
+  \item[$\CgasZsetmodelinear = 29$] $\Omega_Z$（\texttt{pages}）setmode 每页 gas。
+  \item[$\CgasZinvalid = 80$] $\Omega_Z$（\texttt{pages}）无效 $r$ 基本 gas 成本。
+  \item[$\CgasTaurus = 98$] $\Omega_\Taurus$（\texttt{yield}）基本 gas 成本。
+  \item[$\CgasAriesconst = 3980$] $\Omega_\Aries$（\texttt{provide}）基本 gas 成本。
+  \item[$\CgasArieslinear = 2264$] $\Omega_\Aries$（\texttt{provide}）每 1024 八位字节 gas（$\fnmemgas(\CgasArieslinear, \ell)$）。
+  \item[$\CgasGeminiconst = 275$] $\Omega_\Gemini$（\texttt{grow\_heap}）基本 gas 成本。
+  \item[$\CgasGeminilinear = 121$] $\Omega_\Gemini$（\texttt{grow\_heap}）每额外页面 gas。
+\end{description}
+
+\subsubsection{签名上下文（Signing Contexts）}
+
+\begin{description}
+  \item[$\Xavailable = \token{\$jam\_available}$] \emph{Ed25519} 可用性保证。参见方程 \ref{eq:assurancesig}。
+  \item[$\Xbeefy = \token{\$jam\_beefy}$] \emph{\textsc{bls}} Accumulation 结果根-\textsc{mmr} 承诺。参见方程 \ref{eq:accoutsignedcommitment}。
+  \item[$\Xentropy = \token{\$jam\_entropy}$] 链上熵生成。参见方程 \ref{eq:vrfsigcheck}。
+  \item[$\Xfallback = \token{\$jam\_fallback\_seal}$] \emph{Bandersnatch} 回退区块密封。参见方程 \ref{eq:ticketconditionfalse}。
+  \item[$\Xguarantee = \token{\$jam\_guarantee}$] \emph{Ed25519} 保证声明。参见方程 \ref{eq:guarantorsig}。
+  \item[$\Xannounce = \token{\$jam\_announce}$] \emph{Ed25519} 审计公告声明。参见方程 \ref{eq:announcement}。
+  \item[$\Xticket = \token{\$jam\_ticket\_seal}$] \emph{Bandersnatch Ring\textsc{vrf}} 票证生成和常规区块密封。参见方程 \ref{eq:ticketconditiontrue}。
+  \item[$\Xaudit = \token{\$jam\_audit}$] \emph{Bandersnatch} 审计选择熵。参见方程 \ref{eq:initialaudit} 和 \ref{eq:latertranches}。
+  \item[$\Xvalid = \token{\$jam\_valid}$] \emph{Ed25519} 有效 work-report 的判断。参见方程 \ref{eq:judgments}。
+  \item[$\Xinvalid = \token{\$jam\_invalid}$] \emph{Ed25519} 无效 work-report 的判断。参见方程 \ref{eq:judgments}。
+\end{description}

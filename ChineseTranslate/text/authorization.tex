@@ -1,0 +1,30 @@
+\section{授权 (Authorization)}\label{sec:authorization}
+
+我们之前在第 \ref{sec:coremodelandservices} 节中讨论了工作包和服务的模型，但我们尚未就某个 \emph{coretime} 资源如何分配给某个工作包及其关联服务进行实质性讨论。在 \emph{YP} Ethereum 模型中，底层资源 gas 在链上引入时采购，购买者始终是描述要执行的工作的数据（即交易）的作者。相反，在 Polkadot 中，底层资源——parachain 插槽——通常需要大量押金，一次性购买通常为 24 个月，而购买者（通常是一个 parachain 团队）通常与要执行的工作（即 parachain 区块）的作者没有直接关系。
+
+出于灵活性原则，我们希望 \Jam 能够支持 Ethereum 风格和 Polkadot 风格的一系列交互模式。为此，我们引入了\emph{授权系统}，一种将某个 coretime 的使用意图与其上要执行的特定工作负载的规范和提交分离开来的手段。因此，我们能够将 coretime 的购买和分配与使用它要执行的具体工作确定分离开来，从而能够同时支持 Ethereum 风格和 Polkadot 风格的交互模式。
+
+\subsection{授权者与授权 (Authorizers and Authorizations)}
+
+授权系统涉及三个关键概念：\emph{授权者}、\emph{令牌}和\emph{轨迹}。令牌只是一段不透明数据，随工作包一起包含，以帮助论证该工作包应被授权。类似地，轨迹是一段有助于表征或描述某次成功授权的不透明数据。与此同时，授权者是一段逻辑，在某些预先指定且众所周知的计算限制内执行，用于确定一个工作包（包括其令牌）是否被授权在某个特定核心上执行，并在成功时产生一个轨迹。
+
+授权者通过其 \textsc{pvm} 代码哈希与配置 blob 连接后的哈希来标识，后者与令牌和轨迹一样，是对 \textsc{pvm} 代码有意义的不透明数据。工作包被确定为已授权（或未授权）的过程不在链上逻辑的能力范围内，完全在核心内发生，因此在第 \ref{sec:packagesanditems} 节中讨论。然而，链上逻辑必须识别分配给每个核心的每组授权者，以验证工作包合法地能够利用该资源。我们现在将定义的就是这个子系统。
+
+\subsection{池与队列 (Pool and Queue)}
+
+我们将特定核心 $\¬core$ 允许的授权者集合定义为\emph{授权者池} $\authpool[\¬core]$。为了维护此值，对每个核心追踪进一步的状态部分：该核心当前的\emph{授权者队列} $\authqueue[\¬core]$，我们从中取值来填充池。形式上：
+\begin{equation}
+  \label{eq:authstatecomposition}
+  \authpool \in \sequence[\Ccorecount]{\sequence[:\Cauthpoolsize]{\hash}}\ , \qquad
+  \authqueue \in \sequence[\Ccorecount]{\sequence[\Cauthqueuesize]{\hash}}
+\end{equation}
+
+注意：状态部分 $\authqueue$ 只能通过从具有适当特权的服务的 accumulate 逻辑中发出的外部调用来修改。
+
+一个区块的状态转换涉及从队列中将一个新的授权放入池中：
+\begin{align}
+  &\forall \¬core \in \coreindex : \authpool'\subb{\¬core} \equiv {\overleftarrow{F(\¬core) \append \cyclic{\authqueue'\subb{\¬core}\subb{\H_\¬timeslot}}}}^{\Cauthpoolsize} \\
+  &F(\¬core) \equiv \begin{cases} \authpool[\¬core] \seqminusl \set{(g_\g¬workreport)_\wr¬authorizer} &\when \exists g \in \xtguarantees : (g_\g¬workreport)_\¬core = \¬core \\ \authpool[\¬core] & \otherwise \end{cases}
+\end{align}
+
+由于 $\authpool'$ 依赖于 $\authqueue'$，实际上此步骤必须在 accumulation（即 $\authqueue'$ 被定义的阶段）之后计算。注意，我们利用担保外在 $\xtguarantees$ 来移除在当前区块中已被用于证明一个已担保工作包合法性的最旧授权者。这在公式 \ref{eq:guaranteesextrinsic} 中进一步定义。

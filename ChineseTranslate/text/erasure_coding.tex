@@ -1,0 +1,174 @@
+\section{纠删码 (Erasure Coding)}
+\label{sec:erasurecoding}
+
+\newcommand{\join}{\text{join}}
+\newcommand{\spl}[1]{\text{split}_{#1}}
+
+JAM 的数据可用性和分发系统的基础是 \textsc{gf}($2^{16}$) 中的系统化 Reed-Solomon 纠删码函数，与 \cite{lin2014novel} 的算法完成的变换相同。编码速率为 $\fnecoriginalshards(v)$:$v$，其中 $v \in \valcount$ 是验证者数量。
+\begin{equation}\label{eq:ecoriginalshards}
+  \fnecoriginalshards(v \in \valcount) \equiv \max\left(\set{\build{d}{d \in \Nmax{\nicefrac{v}{3} + 2}, \Csegmentsize \rem 2d = 0}}\right)
+\end{equation}
+
+该速率源于我们希望即使 $v$ 个验证者中近三分之二是恶意或失能的也能够重建，纠删码所基于的 16 位 Galois 域，以及为简单起见支持对大小为 $\Csegmentsize$ 的编码段无填充的意愿。当 $\fnecoriginalshards(v) = \nicefrac{v}{3} + 1$ 时，该速率是最优的，\ie 没有多于必要的冗余。这在 $v \in \set{6, 9, 15, 24, 33, 51, 54, 78, 105, 111, 159, 168, 225, 321, 339, 510, 681, 1023}$ 时发生。注意当 $v$ 略低于这些值之一时，速率效率最低。例如，当 $v = 1022$ 时，速率约为 1:4.5。为数据可用性系统的效率，建议验证者集合大小从给定集合中选择。
+
+我们使用 16 位 \textsc{gf} 点的小端 $\blob[2]$ 形式，功能等价由 $\fnencode[2]$ 给出。由此我们可以假设编码函数 $\fnerasurecode{v \in \valcount}{}: \sequence[\fnecoriginalshards(v)]{\blob[2]} \to \sequence[v]{\blob[2]}$ 和恢复函数 $\fnecrecover{v \in \valcount}{}: \protoset{\tuple{\blob[2], \Nmax{v}}}_{\fnecoriginalshards(v)} \to \sequence[\fnecoriginalshards(v)]{\blob[2]}$。编码通过将大小为 $2 \cdot \fnecoriginalshards(v)$ 字节的数据块（在 $\fnerasurecode{v}{}$ 中以 $\fnecoriginalshards(v)$ 个字节对提供）外推为 $v$ 个字节对来完成。恢复通过收集任何不同的 $\fnecoriginalshards(v)$ 个字节对及其索引，并将其转换为原始的 $\fnecoriginalshards(v)$ 个字节对序列来完成。
+
+实际上，这允许对大小为 $2 \cdot \fnecoriginalshards(v)$ 字节倍数的数据进行高效编码和恢复。长度不能被 $2 \cdot \fnecoriginalshards(v)$ 整除的数据必须填充（我们用零填充）。我们在 JAM 协议的两个上下文中使用此纠删码：一个是我们对可变大小（但通常非常大的）数据块进行编码，用于审计 \textsc{da} 和区块分发系统；另一个是我们对小得多的固定大小数据\emph{段}进行编码，用于导入 \textsc{da} 系统。
+
+对于导入 \textsc{da} 系统，我们处理的输入大小为 $\Csegmentsize = \text{4,104}$ 字节，在 1023 个验证者下产生 6 阶的数据并行度。如果同时编码或恢复多个段，我们可以获得更高程度的数据并行度，但对于恢复，我们可能被限制为要求每个段由相同的索引集合组成（取决于具体算法）。
+
+\subsection{块编码与恢复 (Blob Encoding and Recovery)}
+
+我们假设 $v \in \valcount$ 个验证者和某个数据块 $\mathbf{d} \in \blob[2k \cdot \fnecoriginalshards(v)], k \in \N$。该块被分成 $k$ 个整数部分，每个部分是 $\fnecoriginalshards(v)$ 个字节对的序列。每个部分使用上述 $\fnerasurecode{v}{}$ 进行纠删码编码，每个部分产生 $v$ 个字节对。
+
+结果矩阵按其对索引分组并连接形成 $v$ 个\emph{块}，每个块包含 $k$ 个字节对。其中任意 $\fnecoriginalshards(v)$ 个块可用于重建原始数据 $\mathbf{d}$。
+
+形式化地，我们首先定义两个工具函数，用于将某个大序列分割成若干等大小序列以及将此类子序列重新组合成单个大序列：
+\begin{align}
+  \forall n \in \N, k \in \N :\ &\spl{n}(\mathbf{d} \in \blob[kn]) \in \sequence[k]{\blob[n]} \equiv \sq{\mathbf{d}\subrange{0}{n}, \mathbf{d}\subrange{n}{n}, \cdots, \mathbf{d}\subrange{(k-1)n}{n}} \\
+  \forall n \in \N, k \in \N :\ &\join(\mathbf{c} \in \sequence[k]{\blob[n]}) \in \blob[kn] \equiv \mathbf{c}_0 \concat \mathbf{c}_1 \concat \dots
+\end{align}
+
+我们由此定义转置算子：
+\begin{equation}\label{eq:transpose}
+  {}^\text{T}\sq{\sq{\mathbf{x}_{0, 0}, \mathbf{x}_{0, 1}, \mathbf{x}_{0, 2}, \dots}, \sq{\mathbf{x}_{1, 0}, \mathbf{x}_{1, 1}, \dots}, \dots} \equiv \sq{\sq{\mathbf{x}_{0, 0}, \mathbf{x}_{1, 0}, \mathbf{x}_{2, 0}, \dots}, \sq{\mathbf{x}_{0, 1}, \mathbf{x}_{1, 1}, \dots}, \dots}
+\end{equation}
+
+然后我们可以定义纠删码分块函数，它接受长度可整除为 $2 \cdot \fnecoriginalshards(v)$ 字节的任意大小数据块，并生成 $v$ 个较小数据块的序列：
+\begin{equation}\label{eq:erasurecoding}
+  \fnerasurecode{v \in \valcount}{k \in \N}\colon\abracegroup{
+    \blob[2k \cdot \fnecoriginalshards(v)] &\to \sequence[v]{\blob[2k]} \\
+    \mathbf{d} &\mapsto \join^\#\left({}^{\text{T}}\sq{\build{\erasurecode{v}{}{\mathbf{p}}}{\mathbf{p} \orderedin {}^\text{T}\spl{2}^\#(\spl{2k}(\mathbf{d}))}}\right)
+  }
+\end{equation}
+
+原始数据可以用 $v$ 个结果项中的任意 $\fnecoriginalshards(v)$ 个（连同其索引）重建。如果原始的 $\fnecoriginalshards(v)$ 个项已知，则重建就是它们的连接。
+\begin{equation}
+  \label{eq:erasurecodinginv}
+  \fnecrecover{v \in \valcount}{k \in \N}\colon\abracegroup{
+    \protoset{\tuple{\blob[2k], \Nmax{v}}}_{\fnecoriginalshards(v)} &\to \blob[2k \cdot \fnecoriginalshards(v)] \\
+    \mathbf{c} &\mapsto \begin{cases}
+      \encode{\sq{\build{\mathbf{x}}{\tup{\mathbf{x}, i} \orderedin \sqorderby{i}{\tup{\mathbf{x}, i} \in \mathbf{c}}}}} &\when \set{\build{i}{\tup{\mathbf{x}, i} \in \mathbf{c}}} = \Nmax{\fnecoriginalshards(v)}\\
+      \join(\join^\#({}^\text{T}\sq{
+        \build{
+          \ecrecover{v}{}{{\set{\build{
+           (\spl{2}(\mathbf{x})\sub{p}, i)
+          }{
+            \tup{\mathbf{x}, i} \in \mathbf{c}
+          }}}}
+        }{
+          p \in \Nmax{k}
+        }
+      })) &\text{always}\\
+    \end{cases}
+  }
+\end{equation}
+
+
+
+段编码/解码可以使用相同的函数完成，只不过 $k = \nicefrac{\Csegmentsize}{2 \cdot \fnecoriginalshards(v)}$ 是固定的。注意 $\fnecoriginalshards$ 的定义确保这始终是整数，\ie 无需填充。
+
+\subsection{码字表示 (Code Word representation)}
+
+为简洁起见，我们将每个字节对称为一个\emph{字}。码字（包括消息字）被视为 $\finitefield_{2^{16}}$ 有限域的元素。该域作为 $\finitefield_2$ 的扩展，使用不可约多项式生成：
+\begin{equation}
+x^{16} + x^5 + x^3 + x^2 + 1
+\end{equation}
+
+因此：
+\begin{equation}
+\finitefield_{2^{16}} \equiv \frac{\finitefield_2\subb{x}}{x^{16} + x^5 + x^3 + x^2 + 1
+}
+\end{equation}
+
+我们将 $\frac{\finitefield_{2^{16}}}{\finitefield_2}$ 的生成元（即上述多项式的根）命名为 $\authpool$：$\finitefield_{2^{16}} = \finitefield_2(\authpool)$。
+
+我们不使用标准基 $\set{1, \authpool, \authpool^2, \dots, \authpool^{15}}$，而是选择 $\finitefield_{2^{16}}$ 的一种在编码和解码过程中执行效率更高的表示。为此，我们将 $\finitefield_{2^{16}}$ 的这种特定表示命名为 $\tilde{\finitefield}_{2^{16}}$，并将其定义为由以下 Cantor 基生成的向量空间：
+
+\begin{center}
+  \begin{tabular}{ll}
+    & \\
+    \hline
+    $v_0$ & $1$\\
+    $v_1$ & $\authpool^{15} + \authpool^{13} + \authpool^{11} + \authpool^{10} + \authpool^7
+    + \authpool^6 + \authpool^3 + \authpool$\\
+    $v_2$ & $\authpool^{13} + \authpool^{12} + \authpool^{11} + \authpool^{10} + \authpool^3
+    + \authpool^2 + \authpool$\\
+    $v_3$ & $\authpool^{12} + \authpool^{10} + \authpool^9 + \authpool^5 + \authpool^4 +
+    \authpool^3 + \authpool^2 + \authpool$\\
+    $v_4$ & $\authpool^{15} + \authpool^{14} + \authpool^{10} + \authpool^8 + \authpool^7 +
+    \authpool$\\
+    $v_5$ & $\authpool^{15} + \authpool^{14} + \authpool^{13} + \authpool^{11} +
+    \authpool^{10} + \authpool^8 + \authpool^5 + \authpool^3 + \authpool^2 + \authpool$\\
+    $v_6$ & $\authpool^{15} + \authpool^{12} + \authpool^8 + \authpool^6 + \authpool^3 +
+    \authpool^2$\\
+    $v_7$ & $\authpool^{14} + \authpool^4 + \authpool$\\
+    $v_8$ & $\authpool^{14} + \authpool^{13} + \authpool^{11} + \authpool^{10} + \authpool^7
+    + \authpool^4 + \authpool^3$\\
+    $v_9$ & $\authpool^{12} + \authpool^7 + \authpool^6 + \authpool^4 + \authpool^3$\\
+    $v_{10}$ & $\authpool^{14} + \authpool^{13} + \authpool^{11} + \authpool^9 + \authpool^6
+    + \authpool^5 + \authpool^4 + \authpool$\\
+    $v_{11}$ & $\authpool^{15} + \authpool^{13} + \authpool^{12} + \authpool^{11} + \authpool^8$\\
+    $v_{12}$ & $\authpool^{15} + \authpool^{14} + \authpool^{13} + \authpool^{12} + \authpool^{11} + \authpool^{10} + \authpool^8 + \authpool^7 + \authpool^5 + \authpool^4 + \authpool^3$\\
+    $v_{13}$ & $\authpool^{15} + \authpool^{14} + \authpool^{13} + \authpool^{12} +
+    \authpool^{11} + \authpool^9 + \authpool^8 + \authpool^5 + \authpool^4 + \authpool^2$\\
+    $v_{14}$ & $\authpool^{15} + \authpool^{14} + \authpool^{13} + \authpool^{12} +
+    \authpool^{11} + \authpool^{10} + \authpool^9 + \authpool^8 + \authpool^5 + \authpool^4 +
+    \authpool^3$\\
+    $v_{15}$ & $\authpool^{15} + \authpool^{12} + \authpool^{11} + \authpool^8 + \authpool^4
+    + \authpool^3 + \authpool^2 + \authpool$\\
+    \hline
+  \end{tabular}
+\end{center}
+
+每个消息字 $m\sub{i}=m_{i, 15} \ldots m\sub{i, 0}$ 由 16 位组成。因此它可以被视为长度为 16 的二进制向量：
+\begin{equation}
+m\sub{i} = \tup{m\sub{i, 0} \ldots m\sub{i, 15}}
+\end{equation}
+
+其中 $m_{i, 0}$ 是消息字 $m\sub{i}$ 的最低有效位。因此我们考虑域元素 $\widetilde{m\sub{i}} = \sum^{15}_{j = 0} m\sub{i, j} v\sub{j}$ 来表示该消息字。
+
+类似地，我们为每个验证者分配一个介于 0 和 $v - 1$ 之间的唯一索引，并用域元素表示验证者 $i$：
+\begin{equation}
+\tilde{i} = \sum^{15}_{j = 0} i\sub{j} v\sub{j}
+\end{equation}
+
+其中 $i = i_{15} \ldots i_0$ 是 $i$ 的二进制表示。
+
+\subsection{生成多项式 (The Generator Polynomial)}
+
+要对 $d = \fnecoriginalshards(v)$ 个字的消息进行纠删码编码为 $v$ 个码字，我们将每个消息表示为上一节中描述的域元素，并插值一个最高 $d - 1$ 次的多项式 $p(y)$，满足以下等式：
+\begin{equation}
+   \begin{array}{l}
+     p (\tilde{0}) = \widetilde{m_0}\\
+     p (\tilde{1}) = \widetilde{m_1}\\
+     \vdots\\
+     p (\widetilde{d-1}) = \widetilde{m_{d-1}}
+   \end{array}
+\end{equation}
+
+在找到具有这些性质的 $p(y)$ 之后，我们在以下各点计算 $p$ 的值：
+\begin{equation}
+   \begin{array}{l}
+     \widetilde{r_d} : = p (\widetilde{d})\\
+     \widetilde{r_{d+1}} : = p (\widetilde{d+1})\\
+     \vdots\\
+     \widetilde{r_{v-1}} : = p (\widetilde{v-1})
+   \end{array}
+\end{equation}
+
+然后我们根据相应的索引将消息字和额外的码字分发给验证者。
+
+%To ensure the availability of work-package data in an adversarial environment, we use a Reed-Solomon code over the field $GF(2^{16})$ with rate of three to get a three times redundant data to be distributed among validators. This ensures that one-third of the validators may be dishonest or malfunctioning and yet any party is still able to reconstruct a work-package once we are assured that two-thirds-plus-one of the validators have each received their set of chunks for said work-package.
+
+%A guarantor is responsible for making such an encoding for any work-package which they report and to ensure it is distributed among each validator. Further, validators
+
+%Essentially, we define a function:
+
+%Define Reed-Soloman, the base, the 341 and the 1024.
+
+%We divide the WP $\mathbf{p}$ into $c$ chunks of $n*2$ bytes where $c = \ceil{\len{p} / n*2}$ bytes (appending with zeroes as needed for the last chunk), and $c$ chunks each encoded of size $2*3n$ bytes, with each chunk requiring $n*2$ bytes to reconstruct and thus a total of $2cn$ to reconstruct $p$, assuming $2n$ bytes for each decoded chunk (\ie there is correspondence).
+
+%We would send $3 * 2$ bytes to every validator (with $3 * 2$ bytes unsent). Then $1023/3+1$ validators could give us $(1023/3+1)*3*2$ bytes = 1023* 2 bytes, which is enough to reconstruct. In practice of course we'll batch this a lot to divide the $3*(unencoded size)$ data into 1024 chunks, 1 of which we send to each validator.
+
+%The work-report should contain the root of a Merkle tree of these chunks. The guarantors (or validators sending chunks to auditors for reconstruction) should send the Merkle proofs along with the chunks to each validator, which identifies that this chunk comes from this WP for availability voting/reconstruction. An auditor should encode the WP after obtaining it and reconstruct this Merkle root to verify it. (Otherwise, it is possible that another auditor would not be able to reconstruct the same WP from $(1023/3+1)$ chunks with valid Merkle proofs, even if the first auditor reconstructed a WP with a matching WP hash from the report).

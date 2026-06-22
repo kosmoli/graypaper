@@ -1,0 +1,57 @@
+\section{引言 (Introduction)}
+
+\subsection{命名约定 (Nomenclature)}
+
+%As its namesake paper pointed out, the name \emph{Polkadot} means several things depending on context. It might mean variously the product vision set forth in said paper of a scalable heterogeneous multichain; the decentralized blockchain network and service which came to be along with its state and history; or possibly the protocol and technology-base utilized in order to maintain and run this network and others such as \emph{Kusama}.
+
+在本文中，我们介绍了一个去中心化的加密经济协议，Polkadot 网络将在其治理机构批准的基础上进行一次重大修订，过渡到该协议。
+
+该协议的一个早期、未经完善的版本最初在 Polkadot Fellowship \textsc{rfc}\oldstylenums{31} 中提出，名为 \emph{CoreJam}。CoreJam 得名于其服务提案核心的 collect/refine/join/accumulate 计算模型。虽然 CoreJam \textsc{rfc} 提出了对 Polkadot 协议的不完整、范围有限的修改，但 \Jam 指的是一个完整且连贯的整体区块链协议。
+
+\subsection{驱动因素 (Driving Factors)}
+
+在区块链和更广泛的 Web3 领域中，我们首先受到满足弹性需求的驱动。一个合格的 Web3 数字系统应当遵守其声明的服务配置——并理想地满足甚至用户感知到的期望——不论任何经济参与者（包括个人、组织乃至其他 Web3 系统）的意愿、财富或权力如何。不可避免地，这是一种理想化的目标，我们必须务实地对待其实际可达的完美程度。然而，Web3 系统应力求提供如此强健的保证，以至于在实际意义上，该系统可以被描述为\emph{不可阻挡的}。
+
+Bitcoin 或许是经济领域中此类系统的第一个例子，但就其提供的服务性质而言，它并非通用的。基于规则的服务的有用程度取决于可在其中构想和放置的规则的通用性。Bitcoin 的规则允许了一个初始用例，即一种固定发行的代币，其所有权通过密钥知识得到良好的近似和自主强制执行，以及在该主题上的一些进一步延伸。
+
+随后，Ethereum 提供了在类别上更加通用的规则集，实际上是图灵完备的。\footnote{gas 机制确实通过设置可执行步骤数的上限来限制哪些程序可以在其上执行，但在无许可环境中必须引入某种限制以避免无限计算。}在我们旨在提供大规模多用户应用平台的 Web3 背景下，通用性至关重要，因此我们将其视为既定条件。
+
+除了弹性和通用性之外，事情变得更加有趣，我们需要更深入地了解我们的驱动因素。就当前目的而言，我们确定了三个额外的目标：
+\begin{enumerate}
+  \item \label{enum:resilience} 弹性：高度抵抗被停止、破坏和审查。
+  \item \label{enum:generality} 通用性：能够执行图灵完备的计算。
+  \item \label{enum:performance} 性能：能够快速且低成本地执行计算。
+  \item \label{enum:coherency} 连贯性：不同状态元素之间可能的因果关系，以及各个应用程序可组合的程度。
+  \item \label{enum:accessibility} 可及性：创新的障碍可忽略不计；简便、快速、廉价且无许可。
+\end{enumerate}
+
+作为一种声明的 Web3 技术，我们隐含地假设了前两项。有趣的是，根据一个我们确信必定已以某种形式存在但不知其名的信息论原理，\ref{enum:performance} 和 \ref{enum:coherency} 两项是对立的。为便于论证，我们将其命名为\emph{规模-连贯性拮抗}。
+
+\subsection{规模-连贯性拮抗下的扩展 (Scaling under Size-Coherency Antagonism)}
+
+规模-连贯性拮抗是一个简单的原理，意味着随着信息系统的状态空间增长，系统必然变得不那么连贯。这是因果性受速度限制这一原理的直接推论。物理学允许的最大速度是 $C$，即真空中的光速，然而其他信息系统可能有更低的界限：在生物系统中，这主要由各种化学过程决定，而在电子系统中则由电子在各种物质中的速度决定。分布式软件系统的界限往往还要低得多，因为它依赖于可靠性各异的软件、硬件和分组交换网络的基底。
+
+论证如下：
+\begin{enumerate}
+  \item 系统用于数据处理的状态越多，该状态必须占据的空间量就越大。
+  \item 使用的空间越大，状态组件之间距离的均值和方差就越大。
+  \item 随着均值和方差的增加，因果解析时间（即一个事件的所有正确影响被感受到所需的时间）在整个系统中变得发散，从而导致不连贯。
+\end{enumerate}
+
+暂且搁置整体安全性问题，我们可以通过将系统分割为因果独立的子系统来管理不连贯性，每个子系统足够小以保持连贯。在资源丰富的环境中，细菌可以分裂为两个而不是体积增长一倍。这种模式是处理增长下不连贯性的一种相当粗糙的手段：系统内处理具有低规模和完全连贯性，系统间处理支持更大的总体规模但缺乏连贯性。这是 Polkadot、Cosmos 以及 Ethereum 扩展的主流愿景（都将在后文中深入讨论）等元网络背后的原理。此类系统通常依赖于与"结算区域"的异步且简化的通信，这些结算区域提供小范围的连贯状态空间来管理特定交互，如代币转移。
+
+本工作探索了这种拮抗中的一个中间地带，避免了与现有方法一样对系统状态空间的持久分割。我们通过引入一种新的计算模型来实现这一点，该模型将一个高度可扩展的\emph{大部分连贯的}元素与一个同步的、完全连贯的元素流水线化。异步性并未被避免，但我们将其限制在流水线的长度范围内，并用一种通常在共享 \textsc{ram} 的多 \textsc{cpu} 系统中常见的"缓存亲和性"形式替代了我们在可扩展系统中迄今看到的粗糙分区。
+
+与基于 \textsc{snark} 的 L2 区块链扩展技术不同，该模型利用加密经济机制，继承了其低成本和高性能的特征，并避免了对中心化的偏向。
+
+\subsection{文档结构 (Document Structure)}
+
+我们从第 \ref{sec:previouswork} 节对当前区块链技术中扩展方法的简要概述开始。在第 \ref{sec:notation} 节中，我们定义并阐明形式化所依赖的符号体系。
+
+我们随后在第 \ref{sec:overview} 节中对协议进行广泛概述，概述主要领域，包括 Polkadot 虚拟机 (\textsc{pvm})、共识协议 Safrole 和 \textsc{Grandpa}、公共时钟，并奠定形式化基础。
+
+然后我们继续给出完整的协议定义，分为两部分：首先是适用于所有希望验证链状态的节点的正确链上状态转换公式，其次在第 \ref{sec:workpackagesandworkreports} 节和第 \ref{sec:bestchain} 节中，描述拥有验证者密钥的任何参与者的链上行为的诚实策略。
+
+正文以第 \ref{sec:discussion} 节中关于协议性能特征的讨论结束，最后在第 \ref{sec:conclusion} 节中给出结论。
+
+附录包含协议定义所需的各种附加材料，包括附录 \ref{sec:virtualmachine} 和 \ref{sec:virtualmachineinvocations} 中的 \textsc{pvm}、附录 \ref{sec:serialization} 和 \ref{sec:statemerklization} 中的序列化和 Merklization，以及附录 \ref{sec:merklization}、\ref{sec:bandersnatch} 和 \ref{sec:erasurecoding} 中的密码学。我们以附录 \ref{sec:definitions} 中的术语索引结束，该索引包含本文中使用的所有简单常量项的值，并以参考文献列表收尾。

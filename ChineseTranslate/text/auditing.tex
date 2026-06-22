@@ -1,0 +1,182 @@
+\section{审计与判断 (Auditing and Judging)}\label{sec:auditing}
+
+审计和判断系统在理论上等价于 \textsc{Elves} 中的系统，由 \cite{cryptoeprint:2024/961} 引入。有关该机制的完整安全分析，请参见该作品。在术语上存在差异，其中\emph{背书}（backing）、\emph{审批}（approval）和\emph{包含}（inclusion）分别对应我们的担保、审计和累积。
+
+%The main point of divergence is in \Jam extending the utility of the availability system so that it does not simply serve auditing, but also allows data intentionally created as a side effect within a core to be utilized at some later stage without the requirement to re-insert it into the availability system. This creates additional bandwidth \emph{in to} the availability system for the importing of more such data. To maximize the value of this alteration, the expiry time of data entering the availability system is extended well beyond that which is needed for auditing, to 28 days.
+
+\subsection{概述 (Overview)}
+
+审计过程涉及每个节点要求自己获取、评估并对来自每个 JAM 链区块中变为可用的工作报告（即来自 $\justbecameavailable$）的随机但确定性集合发出判断。在任何评估之前，节点声明并证明其要求。此后在特定的共同时间节点，如果任何声明的意图没有在合理时间内得到正面判断匹配，或看到负面判断，则节点要求自己从每个区块的 $\justbecameavailable$ 中评估的工作报告集合可能会扩大。这些扩大事件称为轮次。
+
+如果某个工作报告的所有声明意图在任何给定时间点都得到正面判断匹配，则该工作报告被视为\emph{已审计}。一旦某个给定区块的所有新可用工作报告都已审计，我们则认为该区块为\emph{已审计}。节点最终确认区块的先决条件之一是它视该区块为已审计。注意，虽然关于区块是否已审计会有最终共识，但在区块最终确认时可能没有共识。这不影响该系统的加密经济保证。
+
+在正常运行中，最终不会发现对工作报告的负面判断，审计阶段也不会有直接后果。在不太可能出现负面判断的情况下，会发生以下几种情况之一：如果超过 $\twothirds$ 的验证者仍发出正面判断，则发出负面判断的验证者可能因浪费时间而受到惩罚。如果超过 $\onethird$ 的验证者发出负面判断，则包含该工作报告的区块被列入黑名单。它及其所有后代将被忽略，不能在其上构建。在所有情况下，一旦有足够多的投票，区块作者可以构建裁定并放入争议外部交易中以表示结果。有关详情请参见第 \ref{sec:disputes} 节。
+
+所有公告和判断都发布给所有验证者，连同描述签名材料的元数据。收到确定数据后，验证者应相应地更新其视角（后文定义为 $J$ 和 $A$）。
+
+\subsection{数据获取 (Data Fetching)}
+\label{sec:auditfetching}
+
+对于要审计的每个工作报告，我们使用其纠删根向足够的保证者请求纠删编码块，然后从这些块重建工作包包。该包包含工作包及其外部交易数据、导入段和导入段证明。
+
+我们可以通过确保其哈希等同于工作报告中作为工作包规范包含的哈希来验证工作包。我们可以通过确保它们各自的哈希等同于相关工作项中找到的哈希来验证外部交易数据。
+
+最后，我们可以验证每个导入段，因为证明必须跟在连接的段之后，从而允许验证每个段的哈希包含在对应工作项的引用 Merkle 根和索引中。
+
+导出段不需要以相同方式重建，而应以与担保相同的方式确定，即通过执行精炼逻辑。
+
+工作报告的工作包规范字段中的所有项目应从此已知正确的数据重新计算并验证，本质上重溯担保者的步骤并确保正确性。
+
+\subsection{报告的选择 (Selection of Reports)}
+\label{sec:auditselection}
+
+每个验证者应对收到的每个有效区块执行审计职责。由于我们进入链下逻辑，且不能假设共识，我们此后将自己视为索引为 $v$ 的特定验证者，并假设自己专注于某个最近区块 $\block$，其他术语对应于该区块暗示的状态转换，因此 $\availassignments$ 是该区块的先前可用性分配，$\activeset$ 是其先前验证者集合，$\header$ 是其区块头，等等。实际上，所有考虑必须为所有区块复制，并且多个区块的考虑可能同时进行。
+
+\newcommand*{\local¬reports}{\mathbf{q}}
+\newcommand*{\local¬seed}{s}
+\newcommand*{\local¬tranche}{\mathbf{a}}
+
+我们将可能被要求审计的工作报告序列定义为 $\local¬reports$，长度等于\emph{活跃}核心数量的序列，作为核心索引到刚变为可用的工作报告的映射，如果该核心没有报告变为可用则为 $\none$。形式化地：
+\begin{align}\label{eq:auditselection}
+  \local¬reports &\in \sequence[\nicefrac{\len{\activeset}}{3}]{\optional{\workreport}} \\
+  \local¬reports &\equiv \sq{\build{
+    \begin{rcases}
+      (\availassignments\subb{\cX}_\aa¬guarantee)_\g¬workreport &\when (\availassignments\subb{\cX}_\aa¬guarantee)_\g¬workreport \in \justbecameavailable \\
+      \none &\otherwise
+    \end{rcases}
+  }{
+    \cX \orderedin \Nmax{\nicefrac{\len{\activeset}}{3}}
+  }}
+\end{align}
+
+我们根据专门为它创建的可验证随机量 $\local¬seed\sub{0}$ 来定义初始审计轮次：
+\begin{align}
+  \label{eq:initialaudit}
+  \local¬seed\sub{0} &\in \bssignature{
+    \activeset\subb{v}_\vk¬bs
+  }{
+    \Xaudit \concat \banderout{\H_\¬vrfsig}
+  }{
+    \sq{}
+  } \\
+  \Xaudit &= \token{\$jam\_audit}
+\end{align}
+
+然后我们定义 $\local¬tranche\sub{0}$ 为通过对十个核心的可验证随机选择确定的非空审计项：
+\begin{equation}
+  \local¬tranche\sub{0} = \set{\build{\wrX}{\wrX \in \fyshuffle{\local¬reports, \banderout{\local¬seed\sub{0}}}\subrange{}{10}, \wrX \ne \none}}
+\end{equation}
+
+在新时隙之后每隔 $\Ctrancheseconds = 8$ 秒，新一轮次开始，我们可以确定额外的核心值得我们审计。此类项目定义为 $\local¬tranche\sub{n}$，其中 $n$ 是当前轮次。形式化地：
+\begin{equation}
+  \using n = \ffrac{\wallclock - \Cslotseconds\cdot\H_\¬timeslot}{\Ctrancheseconds}
+\end{equation}
+
+新轮次可能包含来自 $\local¬reports$ 的项目，源于以下两个原因之一：要么收到了负面判断；要么来自前一轮次的判断数量少于该轮次的公告数量。在第一种情况下，验证者始终被要求对工作报告发出判断。在第二种情况下，必须构建一个新的专用 \textsc{vrf} 来确定我们是否需要进行审计和判断。
+
+在所有情况下，我们都发布一个签名声明，说明我们认为哪些核心需要审计（一个\emph{公告}），连同 \textsc{vrf} 签名证据以选择它们以及其他验证者前一轮次中未匹配判断的公告，以便所有其他验证者能够验证公告。\emph{发布公告应被视为无论未来任何信息都将完成审计的合同。}
+
+形式化地，对于每个轮次 $n$，我们确保公告声明被发布并分发给所有其他验证者，连同我们的验证者索引 $v$、证据 $\local¬seed\sub{n}$ 和所有签名数据。验证者的公告声明必须在集合 $S$ 中：
+\begin{align}
+  \label{eq:announcement}
+  S &\equiv \edsignature{\activeset\subb{v}_\vk¬ed}{\Xannounce \append n \concat \mathbf{x}\sub{n} \concat \blake{\H}} \\
+  \where \mathbf{x}\sub{n} &= \encode{\set{\build{\encode[2]{\wrX_\wr¬core} \concat \blake{\wrX}}{\wrX \in \local¬tranche\sub{n}}}}\\
+  \Xannounce &= \token{\$jam\_announce}
+\end{align}
+
+我们将 $A\sub{n}$ 定义为我们在轮次 $n$ 时对哪些验证者被要求审计每个工作报告的感知。这来自其他每个验证者的公告（如上定义）。只有当 $n$ 是当前轮次时才能正确评估。我们对自己的审计要求有绝对的了解。
+\begin{align}
+  A\sub{n}: \workreport &\to \protoset{\Nmax{\len{\activeset}}} \\
+%  \forall \tup{\cX, \wrX} &\in \local¬tranche\sub{0} : v \in q\sub{0}(\wrX)
+  % TODO: #445 ^^^ Fix this.
+\end{align}
+
+我们进一步定义 $J_\top$ 和 $J_\bot$ 为我们已知对每个工作报告分别做出正面和负面判断的验证者索引。我们不关心判断来自哪个轮次。
+\begin{align}
+  J_\bool: \workreport &\to \protoset{\Nmax{\len{\activeset}}}
+\end{align}
+
+我们能够基于已知需要进行审计但尚未看到其判断的验证者数量来定义超出第一轮次的 $\local¬tranche\sub{n}$。信息的延迟到达可能改变 $\local¬tranche\sub{n}$，节点应重新评估并在发生时相应行动。
+
+因此我们可以通过一个新的 \textsc{vrf} 定义超出初始轮次的 $\local¬tranche\sub{n}$，该 \textsc{vrf} 作用于\emph{缺席}验证者集合。
+\begin{align}
+  \nonumber\forall n > 0:&\\
+  \label{eq:latertranches}
+  \ \local¬seed\sub{n}(\wrX) &\in \bssignature{\activeset\subb{v}_\vk¬bs}{\Xaudit \concat \banderout{\H_\¬vrfsig}\concat\blake{\wrX}\append n}{\sq{}} \\
+  \ a_n(\wrX) &\equiv \textstyle\frac{\len{\activeset}}{256\Cauditbiasfactor}\banderout{\local¬seed\sub{n}(\wrX)}\sub{0} < \len{A_{n - 1}(\wrX) \setminus J_\top(\wrX)} \\
+  \ \local¬tranche\sub{n} &\equiv \set{\build{\wrX}{\wrX \in \local¬reports, \wrX \ne \none, a_n(\wrX)}}
+\end{align}
+
+我们定义偏置因子 $\Cauditbiasfactor = 2$，即在前一轮次有一个缺席的情况下，需要对工作报告发出判断的预期验证者数量。\cite{cryptoeprint:2024/961} 的建模表明这是最优的。
+
+后续审计必须以与第一次类似的方式公告。如果在收到新信息（即对先前\emph{缺席}者返回正面判断）后审计要求减少，则任何已公告的审计将完成并发布判断。如果在收到新信息（即发现额外公告但没有伴随判断）后审计要求增加，则我们公告将承担的额外审计。
+
+随着 $n$ 随时间增加，$\local¬tranche\sub{n}$ 变得已知并定义了我们的审计职责。我们必须尝试重建对应于我们必须审计的每个工作报告的所有工作包包。这可以通过从三分之一的验证者请求纠删编码块来完成，通过纠删码的 Merkle 根验证，并按照第 $\ref{sec:erasurecoding}$ 节中定义的恢复函数 $\fnecrecover{\len{\activeset}}{}$ 重建包。
+
+因此，对于任何此类工作报告 $\wrX$，我们确信将能够重建某个候选工作包包 $C(\wrX) \in \blob$。我们将此候选包解码为工作包及其关联的外部交易数据、导入段和导入段证明。这些按第 \ref{sec:auditfetching} 节所述进行验证。然后我们尝试在核心上重现报告以得到 $e\sub{n}$，一个从报告到评估的映射：
+\begin{equation}
+  \begin{aligned}
+    &\forall \wrX \in \local¬tranche\sub{n}: \\
+    &e\sub{n}(\wrX) \Leftrightarrow \begin{cases}
+      M(\wrX, \wpX) &\when \exists \wpX \in \workpackage: \makebundle(\wpX, \wrX_\wr¬srlookup) = C(\wrX) \\
+      \bot &\otherwise
+    \end{cases} \\
+    &\where M(\wrX, \wpX) \equiv \wrX = \computereport(\wpX, \wrX_\wr¬core, \wrX_\wr¬srlookup, (\wrX_\wr¬avspec)_\as¬erasureshards)
+  \end{aligned}
+\end{equation}
+
+此处，$\makebundle$ 是公式 \ref{eq:makebundle} 中定义的包组装函数，$\computereport$ 是公式 \ref{eq:computereport} 中定义的工作报告计算函数。注意，解码或验证包的失败意味着无效的工作报告。
+
+可能可以通过直接向合作的第三方（例如原始担保者）请求完整包数据来绕过获取纠删编码块和从中重建包的过程。但如果该数据无法解码或验证，我们必须回退到从纠删编码块重建。
+
+根据映射 $e\sub{n}$，验证者发出一组判断 $\mathbf{j}\sub{n}$：
+\begin{align}
+  \label{eq:judgments}
+  \mathbf{j}\sub{n} &= \set{\build{
+    \edsigndata{
+      \activeset\subb{v}\sub{\vk¬ed}
+    }{
+      \Xvalidif{e\sub{n}(\wrX)} \concat \blake{\wrX}
+    }
+  }{
+    \wrX \in \local¬tranche\sub{n}
+  }}
+\end{align}
+
+%We denote the guarantors of a work-package $\wrX$ as $\guarantorassignments(\wrX)$ from a particular chain head, and this may be derived from the guarantees extrinsic $\xtguarantees$ of the ancestor block which introduced the work-report. Our restrictions on the guarantees extrinsic (described in section \ref{sec:accumulation}) ensures that this is unique.
+%\begin{equation}
+%\begin{aligned}
+%    \guarantorassignments(\wrX) &\equiv \sq{\build{v}{\tup{s, v} \orderedin a}} \\
+%    \where \tup{\cX, \wrX, a} &\in \xtguarantees \\
+%    \tup{\H, \extrinsic} &\in \ancestors
+%\end{aligned}
+%\end{equation}
+
+所有判断 $\mathbf{j}_*$ 应发布给其他验证者，以便它们构建其 $J$ 视图，并在出现负面判断时可以形成 $\xtdisputes$ 的外部交易。
+
+我们在两种情况下将工作报告视为已审计。要么在没有负面判断且存在某个轮次中我们看到来自我们认为需要审计它的所有验证者的正面判断时；要么当我们看到来自超过验证者集合三分之二的正面判断时。
+\begin{align}
+  U(\wrX) &\Leftrightarrow \bigvee\,\abracegroup[\,]{
+    &J_\bot(\wrX) = \emptyset \wedge \exists n : A\sub{n}(\wrX) \subseteq J_\top(\wrX) \\
+    &\len{J_\top(\wrX)} > \twothirds\len{\activeset}
+  }
+\end{align}
+
+当所有变为可用的工作报告都被视为已审计时，我们的区块 $\block$ 可被视为已审计，该条件记为 $\isaudited$。形式化地：
+\begin{align}
+  \isaudited &\Leftrightarrow \forall \wrX \in \justbecameavailable : U(\wrX)
+\end{align}
+
+对于任何区块，我们须判定其为已审计（即 $\isaudited = \top$）后才能在 \textsc{Grandpa} 中投票最终确认该区块。更多信息请参见第 \ref{sec:grandpa} 节。
+
+此外，我们明确忽略包含我们知道至少 $\onethird$ 的验证者判定为无效的报告的累积的链。包含此类区块的任何链都不符合出块资格。\emph{最佳区块}——即我们在其上构建新区块的区块——被定义为具有最多常规 Safrole 区块且\emph{不}包含任何此类被忽略区块的链。在实现方面，这可能需要回退到更早的头区块或替代分叉。
+
+作为区块作者，如果我们已经观察到对工作报告的足够数量的判断，且至少有一个负面判断，我们可以为工作报告构建一个\emph{裁定}并将其包含在争议外部交易中。如果裁定确定工作报告无效（即少于三分之二加一的判断确认有效性），那么根据前段所述，它应被引入到报告尚未累积的链上。裁定将导致相应的可用性分配从 $\availassignments$ 中被清除，防止无效工作报告的累积。更多详情请参见第 \ref{sec:disputes} 节。
+
+%Unselected work-reports may also be evaluated at a later stage if the node finds that auditing process does not complete adequately. Prior to evaluation of a report, the node announces its intention to audit along with a proof that the intention was derived honestly. Once fetched and evaluated, a judgment is published to all other validators.
+
+%At its foundation this sequence is a random selection of an average of ten reports from each block. It is, however, affected by its perspective on the announcements and judgments of other nodes.
+
+%If it does not see enough positive judgments on any given report, or it sees too many announcements with too few follow-up judgments, then it will eventually decide to conduct the audit itself.
+
+%If an honest validator sees a judgment that a report is invalid it will prioritize the verification of said report and avert finalization of its block until it verifies the report itself.

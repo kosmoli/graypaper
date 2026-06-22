@@ -1,0 +1,20 @@
+\section{Bandersnatch VRF}\label{sec:bandersnatch}
+
+Bandersnatch 曲线由 \cite{cryptoeprint:2021/1152} 定义。
+
+单上下文化的 Bandersnatch Schnorr 类签名 $\bssignature{k}{c}{m}$ 被定义为由 \cite{hosseini2024bandersnatch}（作为 IETF VRF）指定的 \emph{IETF} \textsc{vrf} 模板下的一个公式，并由 \cite{rfc9381} 进一步详细说明。
+
+\begin{align}
+  \bssignature{k \in \bskey}{c \in \blob}{m \in \blob} \subset \blob[96] &\equiv \set{\build{x}{x \in \blob[96], \text{verify}(k, c, m, x) = \top }}  \\
+  \banderout{s \in \bssignature{k}{c}{m}} \in \hash &\equiv \text{output}(x \mid x \in \bssignature{k}{c}{m})\interval{}{32}
+\end{align}
+
+单上下文化的 Bandersnatch Ring\textsc{vrf} 证明 $\bsringproof{r}{c}{m}$ 是利用 Pedersen \textsc{vrf} 的 zk-\textsc{snark} 启用的类似物，同样由 \cite{hosseini2024bandersnatch} 定义，并由 \cite{cryptoeprint:2023/002} 进一步详细说明。
+
+\begin{align}
+  \getringroot{\sequence{\bskey}} \in \ringroot &\equiv \text{commit}(\sequence{\bskey})  \\
+  \bsringproof{r \in \ringroot}{c \in \blob}{m \in \blob} \subset \blob[784] &\equiv \set{\build{x}{x \in \blob[784], \text{verify}(r, c, m, x) = \top }}  \\
+  \banderout{p \in \bsringproof{r}{c}{m}} \in \hash &\equiv \text{output}(x \mid x \in \bsringproof{r}{c}{m})\interval{}{32}
+\end{align}
+
+注意，如果在构造环时某个密钥 $\bskey$ 没有对应的 Bandersnatch 点，则应代之以 \cite{hosseini2024bandersnatch} 中所述的 Bandersnatch \emph{填充点}。

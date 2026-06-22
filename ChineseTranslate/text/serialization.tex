@@ -1,0 +1,318 @@
+\section{序列化编解码器（Serialization Codec）}\label{sec:serialization}
+
+\subsection{通用术语（Common Terms）}
+
+我们的编解码器函数 $\mathcal{E}$ 用于将某个项序列化为八位字节序列。我们将反序列化函数 $\fndecode$ 定义为 $\mathcal{E}$ 的逆函数，能够将某个序列解码为原始值。该编解码器设计为恰好将一个值编码到任何给定的八位字节序列中，在不需要此特性的情况下我们使用特殊的编解码器函数。
+
+\subsubsection{简单编码（Trivial Encodings）}
+我们将 $\none$ 的序列化定义为空序列：
+\begin{equation}
+  \encode{\none} \equiv \sq{}
+\end{equation}
+
+我们还将八位字节序列的序列化定义为其本身：
+\begin{equation}
+  \encode{x \in \blob} \equiv x
+\end{equation}
+
+我们将匿名元组编码为其已编码元素的连接：
+\begin{equation}
+  \encode{\tup{a, b, \dots}} \equiv \encode{a} \concat \encode{b} \concat \dots
+\end{equation}
+
+将多个参数传递给序列化函数等价于传递这些参数的元组。形式上：
+\begin{align}
+  \encode{a, b, \dots} &\equiv \encode{\tup{a, b, \dots}}
+\end{align}
+
+我们定义通用的自然数序列化，能够编码最多 $2^{64}$ 的自然数，为：
+\begin{equation}
+  \fnencode\colon\abracegroup{
+    \Nbits{64} &\to \blob[1:9] \\
+    x &\mapsto \begin{cases}
+     \sq{0} &\when x = 0 \\
+      \sq{2^8-2^{8-l} + \ffrac{x}{2^{8l}}} \concat \encode[l]{x \bmod 2^{8l}} &\when \exists l \in \N_8 : 2^{7l} \le x < 2^{7(l+1)} \\
+     \sq{2^8-1} \concat \encode[8]{x} &\otherwhen x < 2^{64} \\
+    \end{cases}
+  }
+\end{equation}
+
+\subsubsection{序列编码（Sequence Encoding）}
+我们定义序列序列化函数 $\encode{\sequence{T}}$，适用于 $T$ 本身是 $\fnencode$ 定义域子集的情况。我们简单地依次连接序列中每个元素的序列化：
+\begin{equation}
+  \encode{[\mathbf{i}_0, \mathbf{i}_1, ...]} \equiv \encode{\mathbf{i}_0} \concat \encode{\mathbf{i}_1} \concat \dots
+\end{equation}
+
+因此，方便的是，固定长度的八位字节序列（\eg 哈希 $\hash$ 及其变体）具有恒等序列化。
+
+\subsubsection{判别器编码（Discriminator Encoding）}
+当我们有异构项的集合时，例如不同类型元组的联合或不同长度的序列，我们需要判别器来确定已编码项的性质以实现成功的反序列化。判别器编码为自然数，并在项之前紧邻编码。
+
+我们在序列化可变长度的序列项时通常使用\emph{长度判别器}（\eg 通用 blob $\blob$ 或无界数字序列 $\sequence{\N}$）（不过在固定长度项如哈希 $\hash$ 的情况下省略此判别器）。\footnote{注意，由于特定值可能既属于需要判别器的集合又属于不需要判别器的集合，我们遗憾地无法引入一个能够对应\emph{项}的限制进行序列化的函数。需要比基本集合论更复杂的形式化方法，能够不仅考虑值本身还要考虑其所属或来自的项，才能简洁地做到这一点。} 在这种情况下，我们简单地在编码前将项的长度作为前缀。因此，对于某个项 $y \in \tup{x \in \blob, \dots}$，我们通常将其序列化形式定义为 $\encode{\len{x}}\concat\encode{x}\concat\dots$。为了避免在此类情况下重复项，我们定义符号 $\var{x}$ 表示值 $x$ 的项是可变大小的，需要长度判别器。形式上：
+\begin{equation}
+  \var{x} \equiv \tup{\len{x}, x}\text{ 因此 }\encode{\var{x}} \equiv \encode{\len{x}}\concat\encode{x}
+\end{equation}
+
+我们还为通过某个可序列化集合与 $\none$ 的联合定义的项（通常对某个集合 $S$ 记为 $\optional{S}$）定义了一个方便的判别器运算符 $\maybe{x}$：
+\begin{align}
+  \maybe{x} \equiv \begin{cases}
+    0 &\when x = \none \\
+    \tup{1, x} &\otherwise
+  \end{cases}
+\end{align}
+
+\subsubsection{位序列编码（Bit Sequence Encoding）}
+位序列 $b \in \bitstring$ 是一种特殊情况，因为将每个单独的位编码为八位字节将非常浪费。我们改为将位从最低有效位到最高有效位打包成八位字节，并排列成八位字节流。在可变长度序列的情况下，长度作为前缀，如一般情况。
+\begin{align}
+  \encode{b \in \bitstring} &\equiv \begin{cases}
+    \sq{} &\when b = \sq{} \\
+    \sq{
+      \sum\limits_{i=0}^{i < \min(8, \len{b})}
+      b\sub{i} \cdot 2^i
+    } \concat \encode{b\interval{8}{}} &\otherwise\\
+  \end{cases}
+\end{align}
+
+\subsubsection{字典编码（Dictionary Encoding）}
+一般而言，字典直接放置在 Merkle trie 中（详见附录 \ref{sec:merklization}）。然而，小型字典可以合理地编码为按键排序的对序列。形式上：
+\begin{equation}
+  \forall K, V: \encode{d \in \dictionary{K}{V}} \equiv
+    \encode{
+      \var{\sq{
+        \orderby{k}{
+          \build{
+            \tup{\encode{k}, \encode{d\subb{k}}}
+          }{
+            k \in \keys{d}
+          }
+        }
+      }}
+    }
+\end{equation}
+
+\subsubsection{集合编码（Set Encoding）}
+对于任何是集合且上述尚未定义编码的值，我们将集合的序列化定义为集合元素按适当顺序的序列化。形式上：
+\begin{equation}
+  \encode{\set{a, b, c, \dots}} \equiv \encode{a} \concat \encode{b} \concat \encode{c} \concat \dots \where a < b < c < \dots
+\end{equation}
+
+\subsubsection{固定长度整数编码（Fixed-length Integer Encoding）}
+我们首先定义简单的自然数序列化函数，以下标表示最终序列的八位字节数。值以常规的小端方式编码。这用于协议中几乎所有的整数编码。形式上：
+\begin{equation}
+  \fnencode[l \in \N]\colon\abracegroup{
+    \Nbits{8l} &\to \blob[l] \\
+    x &\mapsto \begin{cases}
+      \sq{} &\when l = 0 \\
+      \sq{x \bmod 256} \concat \encode[l - 1]{\floor{\frac{x}{256}}} &\otherwise
+    \end{cases}
+  }
+\end{equation}
+
+对于非自然数参数，$\fnencode[l \in \N]$ 对应于 $\fnencode$ 的定义，除了递归元素使用 $\fnencode[l]$ 而非 $\fnencode$。因此：
+\begin{align}
+  \encode[l \in \N]{a, b, \dots} &\equiv \encode[l]{\tup{a, b, \dots}}\\
+  \encode[l \in \N]{\tup{a, b, \dots}} &\equiv \encode[l]{a} \concat \encode[l]{b} \concat \dots\\
+  \encode[l \in \N]{\sq{\mathbf{i}_0, \mathbf{i}_1, \dots}} &\equiv \encode[l]{\mathbf{i}_0} \concat \encode[l]{\mathbf{i}_1} \concat \dots
+\end{align}
+
+以此类推。
+
+\subsection{区块序列化（Block Serialization）}
+
+区块 $\block$ 被序列化为其元素的常规顺序元组，如方程 \ref{eq:block}、\ref{eq:extrinsic} 和 \ref{eq:header} 所暗示。对于头部，我们定义常规序列化和无符号序列化 $\fnencodeunsignedheader$。形式上：
+
+\newcommand*{\encoderesult}[1]{O\left(#1\right)}
+\newcommand*{\encodeimportref}[1]{I\left(#1\right)}
+\newcommand*{\encodeimportrefs}[1]{I^\#\left(#1\right)}
+\begin{align}
+  \encode{\block} &= \encode{
+    \header,
+    \encodetickets{\xttickets},
+    \encodepreimages{\xtpreimages},
+    \encodeguarantees{\xtguarantees},
+    \encodeassurances{\xtassurances},
+    \encodedisputes{\xtdisputes}
+  }
+  \\
+  \encodetickets{\xttickets} &= \encode{
+    \var{\sq{\build{
+      \tup{\encode[1]{\xt¬entryindex}, \xt¬proof}
+    }{
+      \tup{\xt¬entryindex, \xt¬proof} \orderedin \xttickets}
+    }}}
+  \\
+  \encodepreimages{\xtpreimages} &= \encode{
+    \var{\sq{\build{
+      \tup{\encode[4]{\xp¬serviceindex}, \var{\xp¬data}}
+    }{
+      \tup{\xp¬serviceindex, \xp¬data} \orderedin \xtpreimages}
+    }}}
+  \\
+  \encodeguarantees{\xtguarantees} &= \encode{\var{\xtguarantees}}
+  \\
+  \encodeassurances{\xtassurances} &= \encode{
+    \var{\sq{\build{
+      \tup{\xa¬anchor, \xa¬availabilities, \encode[2]{\xa¬assurer}, \xa¬signature}
+    }{
+      \tup{\xa¬anchor, \xa¬availabilities, \xa¬assurer, \xa¬signature} \orderedin \xtassurances}
+    }}}
+  \\
+  \encodedisputes{\tup{\mathbf{v}, \mathbf{c}, \mathbf{f}}} &= \encode{
+    \var{\sq{\build{
+      \tup{\xv¬reporthash, \encode[4]{\xv¬epochindex},
+        \var{\sq{\build{
+          \tup{\xvj¬validity, \encode[2]{\xvj¬judgeindex}, \xvj¬signature}
+        }{
+          \tup{\xvj¬validity, \xvj¬judgeindex, \xvj¬signature} \orderedin \xv¬judgments
+        }}}
+      }}
+    }{
+      \tup{\xv¬reporthash, \xv¬epochindex, \xv¬judgments} \orderedin \mathbf{v}
+    }}},
+    \var{\mathbf{c}},
+    \var{\mathbf{f}}
+  }
+  \\
+  \encode{\header} &= \encode{
+    \encodeunsignedheader{\header},
+    \H_\¬sealsig
+  }
+  \\
+  \encodeunsignedheader{\header} &= \encode{
+    \H_\¬parent,
+    \H_\¬priorstateroot,
+    \H_\¬extrinsichash,
+    \encode[4]{\H_\¬timeslot},
+    \encodeepochmark{\H_\¬epochmark},
+    \maybe{\H_\¬winnersmark},
+    \encode[2]{\H_\¬authorindex},
+    \H_\¬vrfsig,
+    \var{\H_\¬offendersmark}
+  }
+  \\
+  \encodeepochmark{\none} &= \encode{0}
+  \\
+  \encodeepochmark{\tup{\entropyaccumulator, \entropy_1, \mathbf{k}}} &= \encode{1, \entropyaccumulator, \entropy_1, \var{\mathbf{k}}}
+  \\
+  \encode{\wcX \in \workcontext} &\equiv \encode{
+    \wcX_\wc¬anchorhash,
+    \encode[4]{\wcX_\wc¬anchortime},
+    \wcX_\wc¬anchorpoststate,
+    \wcX_\wc¬anchoraccoutlog,
+    \wcX_\wc¬lookupanchorhash,
+    \encode[4]{\wcX_\wc¬lookupanchortime},
+    \wcX_\wc¬lookupanchorpoststate,
+    \var{\wcX_\wc¬prerequisites}
+  }
+  \\
+  \encode{\asX \in \avspec} &\equiv \encode{
+    \asX_\as¬packagehash,
+    \encode[4]{\asX_\as¬bundlelen},
+    \asX_\as¬erasureroot,
+    \encode[2]{\asX_\as¬erasureshards},
+    \asX_\as¬segroot,
+    \encode[2]{\asX_\as¬segcount}
+  }
+  \\
+  \encode{\wdX \in \workdigest} &\equiv \encode{
+    \encode[4]{\wdX_\wd¬serviceindex},
+    \wdX_\wd¬codehash,
+    \wdX_\wd¬payloadhash,
+    \encode[8]{\wdX_\wd¬gaslimit},
+    \encoderesult{\wdX_\wd¬result},
+    % 这些是可变长度的，因为我们从不单独访问它们，摘要
+    % 从不被 PVM 直接访问且空间在此处是宝贵的。
+    \wdX_\wd¬gasused,
+    \wdX_\wd¬importcount,
+    \wdX_\wd¬xtcount,
+    \wdX_\wd¬xtsize,
+    \wdX_\wd¬exportcount
+  }
+  \\
+  \encode{\wrX \in \workreport} &\equiv \encode{
+    \wrX_\wr¬avspec,
+    \wrX_\wr¬context,
+    \wrX_\wr¬core,
+    \wrX_\wr¬authorizer,
+    \wrX_\wr¬authgasused,
+    \var{\wrX_\wr¬authtrace},
+    \var{\wrX_\wr¬srlookup},
+    \var{\wrX_\wr¬digests}
+  }
+  \\
+  \encode{\gX \in \guarantee} &\equiv \encode{
+    \gX_\g¬workreport,
+    \encode[4]{\gX_\g¬timeslot},
+    \var{\sq{\build{\tup{\encode[2]{v}, s}}{\tup{v, s} \orderedin \gX_\g¬credential}}}
+  }
+  \\
+  \encode{\wpX \in \workpackage} &\equiv \encode{
+    \encode[4]{\wpX_\wp¬authcodehost},
+    \wpX_\wp¬authcodehash,
+    \wpX_\wp¬context,
+    \var{\wpX_\wp¬authtoken},
+    \var{\wpX_\wp¬authconfig},
+    \var{\wpX_\wp¬workitems}
+  }
+  \\
+  \encode{\wiX \in \workitem} &\equiv \encode{
+    \encode[4]{\wiX_\wi¬serviceindex},
+    \wiX_\wi¬codehash,
+    \encode[8]{\wiX_\wi¬refgaslimit},
+    \encode[8]{\wiX_\wi¬accgaslimit},
+    \encode[2]{\wiX_\wi¬exportcount},
+    \var{\wiX_\wi¬payload},
+    \var{\encodeimportrefs{\wiX_\wi¬importsegments}},
+    \var{\sq{\build{
+      \tup{h, \encode[4]{i}}
+    }{
+      \tup{h, i} \orderedin \wiX_\wi¬extrinsics
+    }}}
+  }
+  \\
+  \encode{\stX \in \safroleticket} &\equiv \encode{
+    \stX_\st¬id,
+    \encode[1]{\stX_\st¬entryindex}
+  }
+  \\
+  \encode{\dxX \in \defxfer} &\equiv \encode{
+    1,
+    \encode[4]{\dxX_\dx¬source},
+    \encode[4]{\dxX_\dx¬dest},
+    \encode[8]{\dxX_\dx¬amount},
+    \dxX_\dx¬memo,
+    \encode[8]{\dxX_\dx¬gas}
+  }
+  \\
+  \encode{\otX \in \operandtuple} &\equiv \encode{
+    0,
+    \otX_\ot¬packagehash,
+    \otX_\ot¬segroot,
+    \otX_\ot¬authorizer,
+    \otX_\ot¬payloadhash,
+    \otX_\ot¬gaslimit,
+    \encoderesult{\otX_\ot¬result},
+    \var{\otX_\ot¬authtrace}
+  }
+  \\
+  \encoderesult{o \in \workerror \cup \blob} &\equiv \begin{cases}
+    \tup{0, \var{o}} &\when o \in \blob \\
+    1 &\when o = \infty \\
+    2 &\when o = \panic \\
+    3 &\when o = \badexports \\
+    4 &\when o = \oversize \\
+    5 &\when o = \token{BAD} \\
+    6 &\when o = \token{BIG}
+    \\
+  \end{cases}
+  \\
+  \encodeimportref{\tup{
+    h \in \hash \cup \hash^\boxplus,
+    i \in \Nbits{15}
+  }} &\equiv \begin{cases}
+    \tup{h, \encode[2]{i}} &\when h \in \hash\\
+    \tup{r, \encode[2]{i + 2^{15}}} &\when \exists r \in \hash, h = r^\boxplus\\
+  \end{cases}
+\end{align}
+
+注意上面使用 $O$ 来简洁地编码工作项的结果，以及对 \eg $\xtguarantees$ 和 $\xtpreimages$ 的轻微变换，以考虑其内部元组包含可变长度序列项 $a$ 和 $p$ 需要长度判别器的事实。

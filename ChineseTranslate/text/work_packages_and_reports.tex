@@ -1,0 +1,339 @@
+\section{工作包和工作报告（Work Packages and Work Reports）}\label{sec:workpackagesandworkreports}
+
+\newcommand*{\newavailabilityspecifier}{A}
+\newcommand*{\itemtodigest}{C}
+\newcommand*{\countupexports}{I}
+\newcommand*{\importsegmentdata}{S}
+\newcommand*{\justifysegmentdata}{J}
+\newcommand*{\segrootlookup}{L}
+\newcommand*{\pagedproofs}{P}
+\newcommand*{\marshallrefine}{R}
+\newcommand*{\extrinsicdata}{X}
+\newcommand*{\segsX}{\mathbf{b}}
+\newcommand*{\allexports}{\overline{\mathbf{e}}}
+
+\subsection{诚实行为（Honest Behavior）}
+
+到目前为止，我们已经指定了如何识别正确转换的 \Jam 区块。通过定义状态转移函数和状态 Merklization 函数，我们还定义了如何识别有效头部。虽然对于任何控制允许创建头部中两个签名的密钥的节点来说，理解如何为它编写新区块并不特别困难，实际上填充其他头部字段也是如此，但读者会注意到外部数据的内容仍不清楚。
+
+我们不仅通过创建正确区块来定义正确行为，还定义了\emph{诚实行为}（honest behavior），它涉及节点参与若干\emph{链下}活动。这在\emph{YP}以太坊中确实有类似方面，尽管在该文档中并未如此明确提及：区块的创建以及交易在这些区块中的传播和包含都属于链下活动，诚实行为对此是有帮助的。在 \Jam 的情况下，诚实行为是明确定义的，并且期望至少 $\twothirds$ 的验证者遵守。
+
+除了区块生产之外，受到激励的诚实行为包括：
+\begin{itemize}
+    \item 工作包的保证和报告，以及分块和分发这些块和工作包本身，详见第 \ref{sec:guaranteeing} 节；
+    \item 在收到工作包数据后确保其可用性；
+    \item 确定要审计的工作报告，获取并审计它们，并根据审计结果适当创建和分发判定；
+    \item 提交其他验证者所做审计工作的正确数量，详见第 \ref{sec:bookkeeping} 节。
+\end{itemize}
+
+\subsection{段和清单（Segments and the Manifest）}
+
+工作包通常很小，以确保保证者无需投入大量带宽来发现他们是否能因评估为工作报告而获得报酬。它们不是将大量数据内联，而是通过承诺\emph{引用}数据。最简单的承诺是外部数据。
+
+外部数据是与工作包本身一起引入系统的 blob，通常由工作包构建者提供。它们作为参数暴露给 Refine 逻辑。我们通过在工作包中包含每个外部数据的哈希来承诺它们。
+
+工作包还有另外两种类型的外部数据关联：对每个\emph{导入}段的密码学承诺，以及最终\emph{导出}段的数量。
+
+\subsubsection{段、导入和导出（Segments, Imports and Exports）}
+\label{sec:segments}
+
+从一个工作包向某个后续工作包传递大量数据的能力是 \Jam 可用性系统的关键特征。导出段，定义为集合 $\segment$，是固定长度 $\Csegmentsize = 4104$ 的八位字节序列。它是在工作包的 Refine 函数期间可以单独从长期 D$^3$L 导入或导出到其中的最小数据。
+\begin{equation}\label{eq:segment}
+  \segment \equiv \blob[\Csegmentsize]
+\end{equation}
+
+导出段是通过执行 Refine 逻辑\emph{生成}的数据，因此是将工作包转换为工作报告的副作用。由于其数据基于 Refine 逻辑的执行是确定性的，我们不需要在工作包中对它们进行任何特定的承诺，只需知道每个 Refine 调用关联了多少，以便我们能够提供精确的索引。
+
+另一方面，导入段是由先前工作包导出的段。为了便于获取和验证，它们不是通过哈希引用，而是通过包含引入时任何其他段的 Merkle 树的根以及此序列中的索引来引用。这允许生成正确性的证明，与获取的数据一起存储、包含和验证。这将在下一节中深入描述。
+
+\subsubsection{数据收集和证明（Data Collection and Justification）}
+
+% TODO: #447 提及核心亲和力和保证者-保证者分发。
+
+保证者的任务是通过从足够多的唯一验证者获取所述段的擦除编码块来重建所有导入段。仅重建是不够的，因为如果一个或多个验证者提供了不正确的块，数据将被损坏。为此，我们确保导入段规范（一个 Merkle 根和树中的索引）是一种能够应用证明来证明任何特定段确实正确的密码学承诺。
+
+证明数据必须在其段的潜在需求期间对任何节点可用。证明一个段约 350 字节，证明数据过于庞大，无法让所有验证者存储所有数据。因此，我们使用与数据相同的总体可用性框架来托管证明元数据。
+
+保证者能够使用此证明来向自己证明他们没有在不正确的行为上浪费时间。我们不强制审计者经历相同的过程。相反，保证者构建一个\emph{可审计工作包}，并将其放入审计 \textsc{da} 系统中。这是原始工作包、其外部数据、其导入数据和该导入数据正确性的简洁证明。此策略通常在 D$^3$L 和审计 \textsc{da} 之间复制数据，但这是可接受的，因为审计平均每个工作包发生 30 次，而保证只发生两到三次，因此审计者必须尽可能便宜地证明正确性。
+
+\subsection{包和项（Packages and Items）}\label{sec:packagesanditems}
+
+我们首先定义一个\emph{工作包}，集合 $\workpackage$，及其组成\emph{工作项}，集合 $\workitem$。工作包包括一个充当授权令牌的简单 blob $\wp¬authtoken$、托管授权代码的服务索引 $\wp¬authcodehost$、授权代码哈希 $\wp¬authcodehash$、配置 blob $\wp¬authconfig$、上下文 $\wp¬context$ 和工作项序列 $\wp¬workitems$：
+\begin{equation}
+  \label{eq:workpackage}
+  \workpackage \equiv \tuple{
+    \isa{\wp¬authtoken}{\blob},\\
+    \isa{\wp¬authcodehost}{\serviceid},\\
+    \isa{\wp¬authcodehash}{\hash},\\
+    \isa{\wp¬authconfig}{\blob},\\
+    \isa{\wp¬context}{\workcontext},\\
+    \isa{\wp¬workitems}{\sequence[1:\Cmaxpackageitems]{\workitem}}
+  }
+\end{equation}
+
+工作项包括：$\wi¬serviceindex$ 是它所关联的服务标识符，报告时服务的代码哈希 $\wi¬codehash$（其原像必须从查找锚点区块的角度可用），有效负载 blob $\wi¬payload$，精炼和累积的 gas 限制 $\wi¬refgaslimit$ 和 $\wi¬accgaslimit$，以及其清单的三个元素：导入数据段序列 $\wi¬importsegments$（通过索引和导出工作包的标识来标识先前导出的段），$\wi¬extrinsics$（外部数据哈希和长度的序列）和 $\wi¬exportcount$（此工作项导出的数据段数）。
+\begin{equation}\label{eq:workitem}
+  \workitem \equiv \tuple{\begin{aligned}
+    &\isa{\wi¬serviceindex}{\serviceid},
+    \isa{\wi¬codehash}{\hash},
+    \isa{\wi¬payload}{\blob},
+    \isa{\wi¬refgaslimit}{\gas},
+    \isa{\wi¬accgaslimit}{\gas},
+    \isa{\wi¬exportcount}{\N}, \\
+    &\isa{\wi¬importsegments}{\sequence{\tuple{\hash \cup (\hash^\boxplus),\N}}},
+    \isa{\wi¬extrinsics}{\sequence{\tuple{\hash, \N}}}
+  \end{aligned}}
+\end{equation}
+
+注意，导入数据段的工作包通过集合 $\hash$ 和带标签变体 $\hash^\boxplus$ 的联合来标识。取自常规 $\hash$ 的值意味着哈希值是包含导出的段根的哈希，而取自 $\hash^\boxplus$ 的值意味着哈希值是导出工作包的哈希。在后一种情况下，它必须由保证者转换为段根，并在工作报告中报告此转换以供链上验证。以这种方式引用的工作包被视为依赖项，在上下文 $\wp¬context$ 中明确列为先决条件的工作包也是如此。我们将依赖项总数限制为 $\Cmaxreportdeps = 8$：
+\begin{equation}
+  \forall \wpX \in \workpackage: \len{\set{\build{h}{\wiX \in \wpX_\wp¬workitems, \tup{h^\boxplus, n} \in \wiX_\wi¬importsegments}}} + \len{(\wpX_\wp¬context)_\wc¬prerequisites} \le \Cmaxreportdeps
+\end{equation}
+
+我们将导出项总数限制为 $\Cmaxpackageexports = 3072$，导入项总数限制为 $\Cmaxpackageimports = 3072$，外部数据总数限制为 $\Cmaxpackagexts = 128$：
+\begin{equation}
+  \label{eq:limitworkpackagebandwidth}
+  \!\!\!\!
+  \begin{aligned}
+    &\forall \wpX \in \workpackage: \\
+    &\ \sum_{\wiX \in \wpX_\wp¬workitems} \wiX_\wi¬exportcount \le \Cmaxpackageexports \wedge\\
+    \sum_{\wiX \in \wpX_\wp¬workitems} \len{\wiX_\wi¬importsegments} \le \Cmaxpackageimports \wedge\\
+    \sum_{\wiX \in \wpX_\wp¬workitems} \len{\wiX_\wi¬extrinsics} \le \Cmaxpackagexts
+  \end{aligned}
+\end{equation}
+
+我们假设每个工作项中每个外部数据哈希的原像为保证者所知。通常，这些数据会与工作包一起传递给保证者。
+
+我们将可审计\emph{工作包束}的总大小限制在约 13.6\textsc{mb}，包含工作包、导入和外部数据项，以及所有有效负载、授权者配置和授权令牌。此限制允许每核心 2\textsc{mb}/s 的 D$^{3}$L 导入，因此在没有外部数据、授权令牌和跟踪各 64 字节、工作项有效负载为 4\textsc{kb} 的情况下，可完整导入 3,072 个导入：
+\begin{align}
+  \label{eq:checkextractsize}
+  &\begin{aligned}
+    &\forall \wpX \in \workpackage: \Big(\len{\wpX_\wp¬authtoken} + \len{\wpX_\wp¬authconfig} +
+    \!\!\!\sum_{\wiX \in \wpX_\wp¬workitems}\!\!\!S(\wiX)\Big) \le \Cmaxbundlesize \\
+    &\where S(\wiX \in \workitem) \equiv \len{\wiX_\wi¬payload} + \len{\wiX_\wi¬importsegments}\cdot\Csegmentfootprint + \!\!\!\!\!\!\!\!\!\!\!\!\!\!\sum_{\tup{h, l} \in \wiX_\wi¬extrinsics} \!\!\!\!l
+  \end{aligned}\\
+  \label{eq:segmentfootprint}
+  &\Csegmentfootprint \equiv \Csegmentsize + 32\ceil{\log_2(\Cmaxpackageexports)}\\
+  &\Cmaxbundlesize \equiv \Cmaxpackageimports\cdot\Csegmentfootprint + 4096 + 64 + 64 = 13,791,360
+\end{align}
+
+我们将两个 gas 限制之和限制在对应操作分配给核心的最大 gas 以内：
+\begin{equation}
+  \label{eq:wplimits}
+  \forall \wpX \in \workpackage:\ \;
+    \sum_{\wiX \in \wpX_\wp¬workitems}(\wiX_\wi¬accgaslimit) < \Creportaccgas
+  \quad\wedge\ \;
+    \sum_{\wiX \in \wpX_\wp¬workitems}(\wiX_\wi¬refgaslimit) < \Cpackagerefgas
+\end{equation}
+
+%方程 \ref{eq:checkextractsize} 的含义是我们可以访问所有外部数据的原像。对于保证，这意味着工作包编写者可能将原像与工作包本身一起提交。对于审计，外部数据原像可以以与工作包相同的方式重建。两者稍后描述。
+
+给定某个工作项的结果 $\wd¬result$ 和使用的 gas $\wd¬gasused$，我们定义项到摘要函数 $\itemtodigest$ 为：
+\begin{equation}
+  \itemtodigest\colon\abracegroup{
+    \tuple{\workitem, \blob \cup \workerror, \gas} &\to \workdigest\\
+    \tup{\tup{\begin{aligned}
+      &\¬serviceindex, \¬codehash, \¬payload,\\
+      &\wi¬accgaslimit, \¬exportcount, \wi¬importsegments, \wi¬extrinsics
+    \end{aligned}
+    }, \wd¬result, \wd¬gasused} &\mapsto \tup{\begin{aligned}
+      &\wd¬serviceindex,\,
+      \wd¬codehash,\,
+      \is{\wd¬payloadhash}{\blake{\¬payload}},\,
+      \is{\wd¬gaslimit}{\wi¬accgaslimit},\,
+      \wd¬result,\,
+      \wd¬gasused,\\
+      &\is{\wd¬importcount}{\len{\wi¬importsegments}},\,
+      \wd¬exportcount,\,
+      \is{\wd¬xtcount}{\len{\wi¬extrinsics}},\,
+      \is{\wd¬xtsize}{\!\!\!\!\!\!\!\!\!\!\!\!\!\sum_{\tup{h, z} \in \wi¬extrinsics}\!\!\!\!\!\!\!\!\!\!z}
+    \end{aligned}}\!\!\!\!\!
+  }
+\end{equation}
+
+我们将工作包的隐含授权者定义为 $\wpX_\wp¬authorizer$，即授权代码哈希与配置连接的哈希。我们将授权代码定义为 $\wpX_\wp¬authcode$，并要求它在查找锚点区块时从服务 $\wpX_\wp¬authcodehost$ 的历史查找中可用。形式上：
+\begin{equation}
+  \forall \wpX \in \workpackage: \abracegroup[\,]{
+    \wpX_\wp¬authorizer &\equiv \blake{\wpX_\wp¬authcodehash \concat \wpX_\wp¬authconfig} \\
+    \encode{\var{\wpX_\wp¬metadata}, \wpX_\wp¬authcode} &\equiv \histlookup(\accounts\subb{\wpX_\wp¬authcodehost}, (\wpX_\wp¬context)_\wc¬lookupanchortime, \wpX_\wp¬authcodehash) \\
+    \tup{\wpX_\wp¬metadata, \wpX_\wp¬authcode} &\in \tuple{\blob, \blob}
+  }
+\end{equation}
+
+（历史查找函数 $\histlookup$ 定义在方程 \ref{eq:historicallookup} 中。）
+
+\subsubsection{导出（Exporting）}
+任何工作包的工作项都可以\emph{导出}段，工作报告中放置了一个\emph{段根}来承诺这些段，按导出的工作项排序。它按照方程 \ref{eq:constantdepthmerkleroot} 中定义的常数深度二叉 Merkle 树的根形成。
+
+保证者被要求擦除编码和分发两个数据集：一个 blob，可审计的\emph{包束}，包含编码的工作包、外部数据和自证导入段，放置在短期审计 \textsc{da} 存储中；以及第二个导出段数据集与\emph{分页证明}（Paged-Proofs）元数据。第一个存储中的项是短暂的；确信者被期望仅在工作报告的工作包可用性的区块最终确认之前保留它们。第二个存储中的项是长期的，期望在工作报告报告后至少保留 28 天（672 个完整纪元）。后一个存储称为\emph{分布式、去中心化数据湖}（Distributed, Decentralized, Data Lake）或 D$^3$L，因为其大小。
+
+我们定义分页证明函数 $\pagedproofs$，它接受一系列导出段 $\mathbf{s}$ 并定义通过擦除编码和分发放入 D$^3$L 的一些额外段系列。该函数计算哈希页面和子树证明，使得可以基于段根进行正确性证明：
+\begin{equation}\label{eq:pagedproofs}
+  \!\!\pagedproofs\colon\abracegroup{
+    \sequence{\segment} \to \,&\sequence{\segment} \\
+    \mathbf{s} \mapsto \,&\sq{\build{
+      \zeropad{l}{\encode{
+        \var{\merklejustsubpath{6}{\mathbf{s}, i}},
+        \var{\merklesubtreepage{6}{\mathbf{s}, i}}
+      }}
+    }{
+      i \orderedin \Nmax{\ceil{\nicefrac{\len{\mathbf{s}}}{64}}}
+    }} \\
+    & \where l = \Csegmentsize
+  }\!\!\!\!
+\end{equation}
+
+\subsection{工作报告的计算（Computation of Work-Report）}\label{sec:computeworkreport}
+
+我们现在来介绍工作报告计算函数 $\computereport$。这构成了 \Jam 上所有核心利用的基础。它接受某个工作包 $\wpX$、指定核心 $\¬core$、段根字典 $\wr¬srlookup$ 和确信者集合大小 $\as¬erasureshards$，结果为错误 $\error$ 或工作报告。此函数是确定性的，只需要在最近最终确认区块的八个纪元内评估即可，这得益于历史查找功能。因此，任何节点在审计期间都可以舒适地评估它，即使考虑到不完美同步的实际情况。形式上：
+\begin{equation}\label{eq:computereport}
+  \computereport \colon \abracegroup{
+    &\tuple{\workpackage, \coreindex, \dictionary{\hash}{\hash}, \valcount} \to \workreport \cup \set{\error} \\
+    &\tup{\wpX, \¬core, \wr¬srlookup, \as¬erasureshards} \mapsto \begin{cases}
+      \error &\when E \\
+      \tup{\begin{aligned}
+        &\wr¬avspec, \is{\wr¬context}{\wpX_\wp¬context}, \¬core, \\
+        &\is{\wr¬authorizer}{\wpX_\wp¬authorizer}, \wr¬authtrace, \wr¬srlookup, \wr¬digests, \wr¬authgasused
+      \end{aligned}} &\otherwise
+    \end{cases}
+  }
+\end{equation}
+
+\newcommand*{\local¬theitem}{m}
+其中：
+\begin{align*}
+  \tup{\wr¬authtrace, \wr¬authgasused} &= \Psi_I(\wpX, \¬core) \\
+  E &= \wr¬authtrace \not\in \blob[:\Cmaxreportvarsize] \vee \keys{\wr¬srlookup} \ne \set{\build{h}{\wiX \in \wpX_\wp¬workitems, \tup{h^\boxplus, n} \in \wiX_\wi¬importsegments}} \\
+  \tup{\wr¬digests, \allexports} &= \transpose \sq{\build{
+    (\itemtodigest(\wpX_\wp¬workitems\subb{j}, r, u), \mathbf{e})
+  }{
+    \tup{r, u, \mathbf{e}} = \countupexports(\wpX, j),\,
+    j \orderedin \Nmax{\len{\wpX_\wp¬workitems}}
+  }} \\
+  \countupexports(\wpX, j) &\equiv \begin{cases}
+    \tup{\oversize, u, \sq{\segment_0, \segment_0, \dots}\interval{}{\local¬theitem_\wi¬exportcount}} &\when \len{r} + z > \Cmaxreportvarsize\\
+    \tup{\badexports, u, \sq{\segment_0, \segment_0, \dots}\interval{}{\local¬theitem_\wi¬exportcount}} &\otherwhen \len{\mathbf{e}} \ne \local¬theitem_\wi¬exportcount \\
+    \tup{r, u, \sq{\segment_0, \segment_0, \dots}\interval{}{\local¬theitem_\wi¬exportcount}} &\otherwhen r \not\in \blob \\
+    \tup{r, u, \mathbf{e}} &\otherwise \\
+    \multicolumn{2}{l}{\where \tup{r, \mathbf{e}, u} = \Psi_R(
+      c, j, \wpX, \wr¬authtrace, \importsegmentdata^\#_\wr¬srlookup(\wpX_\wp¬workitems), \ell
+    )}\\
+    \multicolumn{2}{l}{\also h = \blake{\wpX}\,,\; \local¬theitem = \wpX_\wp¬workitems\subb{j}\,,\; \ell = \sum_{k < j}\wpX_\wp¬workitems\subb{k}_\wi¬exportcount}\\
+    \multicolumn{2}{l}{\also z = \len{\wr¬authtrace} + \sum_{k < j, \tup{r \in \blob, \dots} = I(\wpX, k)} \len{r}}
+  \end{cases}
+\end{align*}
+
+注意，我们优雅地处理了两种情况：工作输出的大小会使工作报告超过其可接受大小的情况，以及工作项的 Refinement 执行导出的段数在工作项的导出段计数中报告不正确的情况。在这两种情况下，工作包整体仍然有效，但工作项的导出段被替换为等于导出段计数的零段序列，其输出被替换为错误。
+
+引入的第一个项 $\tup{\wr¬authtrace, \wr¬authgasused}$ 是授权跟踪，即 Is-Authorized 函数的结果及其使用的 gas 量。Is-Authorized 逻辑必须首先执行，以确保工作包具备所需的核心时间。
+
+下一个项 $E$ 在给定参数没有有效报告时为 $\top$。如果 Is-Authorized 函数失败或段根字典 $\wr¬srlookup$ 不包含预期条目，就会出现这种情况。预计 $\wr¬srlookup$ 对所有不是直接通过段根而是通过工作包哈希标识的导入段的唯一工作包哈希都有条目。
+
+为了期望因正在构建的工作报告而获得报酬，保证者必须为 $\wr¬srlookup$ 组合一个值，不仅要确保上述内容，还要确保一个进一步的约束，即所有工作包哈希和段根对确实正确对应：
+\begin{equation}
+  \begin{aligned}
+    &\forall \kv{h}{e} \in \wr¬srlookup : \exists \wpX, \¬core, \mathbf{d}, \as¬erasureshards \in \workpackage, \coreindex, \dictionary{\hash}{\hash}, \valcount :\\
+    &\blake{\wpX} = h \wedge (\computereport(\wpX, \¬core, \mathbf{d}, \as¬erasureshards)_\wr¬avspec)_\as¬segroot = e
+  \end{aligned}
+\end{equation}
+
+只要保证者无法满足上述约束，就应认为该工作包无法被保证。审计者不需要填充 $\wr¬srlookup$，而是重用他们正在审计的工作报告中的值。
+
+第三项 $\tup{\wr¬digests, \allexports}$ 是工作包中每个工作项的结果序列以及每个工作项导出的所有段。第四个定义 $\countupexports$ 执行有序累积（\ie 计数器），以确保 Refine 函数能够访问从工作包到当前工作项所做导出的总数。
+
+上述依赖于两个函数 $\importsegmentdata_\wr¬srlookup$ 和 $\extrinsicdata$，它们分别定义导入段数据（使用段根字典 $\wr¬srlookup$）和某个工作项参数 $\wiX$ 的外部数据。我们还定义了段根查找函数 $\segrootlookup_\wr¬srlookup$，它将段根或工作包哈希折叠为段根，以及 $\justifysegmentdata_\wr¬srlookup$，它编译段数据的证明：
+\begin{equation}
+  \begin{aligned}
+    \extrinsicdata(\wiX \in \workitem) &\equiv \sq{\build{\mathbf{d}}{(\blake{\mathbf{d}}, \len{\mathbf{d}}) \orderedin \wiX_\wi¬extrinsics}} \\
+    \forall \wr¬srlookup \in \dictionary{\hash}{\hash} &: \\
+    \segrootlookup_\wr¬srlookup(r \in \hash \cup \hash^\boxplus) &\equiv \begin{cases}
+      r &\when r \in \hash \\
+      \wr¬srlookup\subb{h} &\when \exists h \in \hash: r = h^\boxplus
+    \end{cases} \\
+    \importsegmentdata_\wr¬srlookup(\wiX \in \workitem) &\equiv \sq{\build{\segsX\subb{n}}{\merklizecd{\segsX} = \segrootlookup_\wr¬srlookup(r), \tup{r, n} \orderedin \wiX_\wi¬importsegments}} \\
+    \justifysegmentdata_\wr¬srlookup(\wiX \in \workitem) &\equiv \sq{\build{\var{\merklejustsubpath{0}{\segsX, n}}}{\merklizecd{\segsX} = \segrootlookup_\wr¬srlookup(r), \tup{r, n} \orderedin \wiX_\wi¬importsegments}}
+  \end{aligned}
+\end{equation}
+
+注意，虽然 $\importsegmentdata_\wr¬srlookup$ 和 $\justifysegmentdata_\wr¬srlookup$ 的公式（由于内部项 $\segsX$）似乎需要导入所有导出段的工作包导出的所有段，但通常不需要如此大量的数据。特别是，每个证明可以通过单个分页证明推导。这将保证者的最坏情况数据获取减少到每导入一个段需要获取两个段。在连续导出的段被导入的情况下（我们可以假设这是相当常见的情况），单个证明页面应该足以证明许多导入段。
+
+使用这三个函数，我们现在可以定义\emph{包束组装}（Bundle Assembly）函数 $\makebundle$，它从工作包和段根字典组装审计友好的包束。包束包含工作包本身、外部数据以及连接的导入段及其正确性证明。
+\begin{equation}\label{eq:makebundle}
+  \makebundle \colon \abracegroup{
+    &\tuple{\workpackage, \dictionary{\hash}{\hash}} \to \blob \\
+    &\tup{\wpX, \wr¬srlookup} \mapsto \encode{
+      \wpX,
+      \extrinsicdata^\#(\wpX_\wp¬workitems),
+      \importsegmentdata_\wr¬srlookup^\#(\wpX_\wp¬workitems),
+      \justifysegmentdata_\wr¬srlookup^\#(\wpX_\wp¬workitems)
+    }
+  }
+\end{equation}
+
+注意缺少长度前缀：只有证明的 Merkle 路径有长度前缀。所有其他序列长度可通过工作包本身确定。
+
+最后，我们可以使用 $\makebundle$ 以及尚未定义的\emph{可用性说明符}（Availability Specifier）函数 $\newavailabilityspecifier$（见第 \ref{sec:availabiltyspecifier} 节）将 $\wr¬avspec$ 定义为包的数据可用性规范：
+\begin{equation}
+  \wr¬avspec = \newavailabilityspecifier(
+    \blake{\wpX},
+    \makebundle(\wpX, \wr¬srlookup),
+    \concatall{\allexports},
+    \as¬erasureshards
+  )
+\end{equation}
+
+在执行 Refine 函数之前，保证者应确保构成导入段承诺的所有段树根都已知且未过期。此外，保证者应确保他们可以获取所有作为外部数据段承诺引用的原像数据。
+
+保证者必须重建导入段，但此过程实际上可能是惰性的，因为 Refine 函数在进行\emph{获取}（fetch）宿主调用之前不使用数据。获取通常意味着，对于每个导入段，从足够多的唯一验证者（约三分之一）检索擦除编码块，附录 \ref{sec:erasurecoding} 中有更深入的描述。（由于我们指定系统擦除编码，在正确验证者响应的情况下其重建是微不足道的。）必须为数据本身和允许我们确保数据正确的证明元数据获取块。
+
+验证者在其作为可用性确信者的角色中，应根据其重建所促进的段树的索引来索引此类块。由于段块的数据非常小（在 1023 个确信者的情况下为 12 个八位字节），应将固定通信成本保持在最低限度。良好的网络协议（目前不在范围内）将允许保证者仅指定段树根和索引以及一个布尔值来指示是否需要提供证明块。由于我们假设有足够多的其他验证者在线且善意，我们可以假设保证者能够基于用 $\mathbf{s}^\clubsuit$ 承诺的数据的一般可用性自信地计算上面的 $\importsegmentdata_\wr¬srlookup$ 和 $\justifysegmentdata_\wr¬srlookup$，$\mathbf{s}^\clubsuit$ 在下面指定。注意，每个导入段必须从确信其可用性的验证者集合中获取；该集合可能不再活跃，其大小可能与活跃验证者集合不同。
+
+\subsubsection{可用性说明符（Availability Specifier）}\label{sec:availabiltyspecifier}
+我们定义可用性说明符函数 $\newavailabilityspecifier$，它从包哈希、审计友好的工作包包束的八位字节序列、导出段序列和确信验证者集合的大小创建可用性说明符：
+\begin{equation}
+  \!\!\!\!
+  \newavailabilityspecifier\colon\abracegroup[\,]{
+    \tuple{\hash, \blob, \sequence{\segment}, \valcount} &\to \avspec\\
+    \tup{\as¬packagehash, \mathbf{b},\,\mathbf{s}, \as¬erasureshards} &\mapsto \tup{
+      \as¬packagehash,\,
+      \is{\as¬bundlelen}{\len{\mathbf{b}}},\,
+      \as¬erasureroot,\,
+      \as¬erasureshards,\,
+      \is{\as¬segroot}{\merklizecd{\mathbf{s}}},\,
+      \is{\as¬segcount}{\len{\mathbf{s}}}
+    }
+  }\!\!\!\!\!
+\end{equation}
+\begin{align*}
+  \where \as¬erasureroot &= \merklizewb{
+    \sq{\build{\concatall{\mathbf{x}}}{\mathbf{x} \orderedin \transpose \sq{\mathbf{b}^\clubsuit, \mathbf{s}^\clubsuit}}}
+  }\\
+  \also \mathbf{b}^\clubsuit &= \blakemany{\erasurecode{\as¬erasureshards}{\ceil{\nicefrac{\len{\mathbf{b}}}{z}}}{\zeropad{z}{\mathbf{b}}}}\\
+  \also \mathbf{s}^\clubsuit &= \merklizewbmany{\transpose\erasurecodemany{\as¬erasureshards}{\nicefrac{\Csegmentsize}{z}}{\mathbf{s} \concat \pagedproofs(\mathbf{s})}}\\
+  \also z &= 2 \cdot \fnecoriginalshards(\as¬erasureshards)
+\end{align*}
+
+分页证明函数 $\pagedproofs$，在方程 \ref{eq:pagedproofs} 中较早定义，接受段序列并返回足以证明每个段正确性的分页证明序列。产出的段数恰好为 $\ceil{\nicefrac{1}{64}}$ 个分页证明段，每个由包含 64 个段哈希的页面以及从根到包含这些 64 个段的子树根的 Merkle 证明组成。
+
+函数 $\fnmerklizecd$ 和 $\fnmerklizewb$ 是固定深度和简单二叉 Merkle 根函数，分别定义在方程 \ref{eq:constantdepthmerkleroot} 和 \ref{eq:simplemerkleroot} 中。函数 $\fnerasurecode{}{}$ 和 $\fnecoriginalshards$ 是擦除编码和原始块数函数，定义在附录 \ref{sec:erasurecoding} 中。
+
+$\fnzeropad{}$ 是零填充函数，将八位字节数组填充到 $n$ 的倍数长度：
+\begin{equation}\label{eq:zeropadding}
+  \fnzeropad{n \in \Nclamp{1}{}}\colon\abracegroup{
+    \blob &\to \blob[k \cdot n]\\
+    \mathbf{x} &\mapsto \mathbf{x} \concat \sq{0, 0, \dots}\interval{((\len{x} + n - 1) \bmod n) + 1}{n}
+  }
+\end{equation}
+
+验证者有激励去将每个新擦除编码的数据块分发给相关验证者，因为除非工作报告被超多数验证者认为\emph{可用}，否则他们不会获得保证报酬。给定我们的工作包 $\mathbf{p}$，因此我们应该将对应的工作包包束块和导出段块发送给每个验证者，连同证明以使每个验证者能够根据工作报告的\emph{擦除根}证明完整性。在即将到来的纪元变更的情况下，他们也可以通过分发给新的验证者集合来最大化预期收益。注意，由于擦除编码取决于确信验证者集合的大小，向两个大小不同的验证者集合分发需要执行两次擦除编码并生成两个不同的工作报告，其中只有一个可以在链上报告。
+
+我们将在下一节中看到此函数的使用，用于保证、审计和判定。
+
+\undef{\newavailabilityspecifier}
+\undef{\itemtodigest}
+\undef{\countupexports}
+\undef{\importsegmentdata}
+\undef{\pagedproofs}
+\undef{\marshallrefine}
+\undef{\extrinsicdata}
+\undef{\segsX}

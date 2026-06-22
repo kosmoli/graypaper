@@ -1,0 +1,418 @@
+\section{报告与保证（Reporting and Assurance）}
+\label{sec:reporting}
+
+报告与保证是我们执行的两个链上流程，用于使核内计算的结果进入服务账户 $\accounts$ 的状态。一个 \emph{work-package}，由若干 \emph{work-item} 组成，由充当 \emph{guarantor} 的验证者转换为对应的 \emph{work-report}，其中同样包含若干 \emph{work-digest}，随后通过 \emph{guarantee} 外部交易在链上提交。此时，work-package 被纠删编码为大量片段，每个片段分发给关联的验证者，然后该验证者通过链上放置的 \emph{assurance} 来证明其可用性。在足够的 assurance 之后，work-report 被视为 \emph{available}（可用的），work-digest 通过累积（accumulation）转换其关联服务的状态，详见第 \ref{sec:accumulation} 节。报告也可能被 \emph{timed-out}（超时），意味着它可能被另一个报告替换而不经过累积。
+
+因此，从 work-report 的角度来看，先发生 guarantee 再发生 assurance。然而，从区块状态转换的角度来看，最好先处理 assurance，因为每个核心只能有一个 \emph{availability assignment}（可用性分配）（一个已保证但等待可用的 work-report）。因此，我们将首先介绍处理可用性保证所产生的转换，然后介绍 work-report 的保证。这种同步性可以通过中间状态 $\availassignmentspostassurances$ 的要求正式体现，该状态稍后在方程 \ref{eq:reportcoresareunused} 中使用。
+
+
+
+
+\subsection{状态（State）}
+报告与可用性部分的状态主要包含在 $\availassignments$ 中，它跟踪每个核心的 \emph{availability assignment}（可用性分配），如果有的话。可用性分配是一个已报告但尚未被超级多数验证者知晓为可用的 work-report 保证，以及报告时间。形式化定义如下：
+\begin{equation}
+  \label{eq:reportingstate}
+  \availassignments \in \sequence[\Ccorecount]{
+    \optional{\tuple{
+      \isa{\aa¬guarantee}{\guarantee} ,\,
+      \isa{\aa¬timestamp}{\timeslot}
+    }}
+  }
+\end{equation}
+
+与往常一样，中间值和后验值（$\availassignmentspostjudgment$、$\availassignmentspostassurances$、$\availassignmentspostguarantees$）与先验值受相同约束。
+
+work-report 保证（属于集合 $\guarantee$）由一个 work-report 以及 guarantor 证明其正确性的签名组成。$\guarantee$ 的形式化定义以及保证的进一步讨论见第 \ref{sec:workreportguarantees} 节。目前，我们关注的是保证所证明的 work-report。
+
+\subsubsection{工作报告（Work Report）}
+\label{sec:workreport}
+work-report（属于集合 $\workreport$）被定义为一个元组，包含：work-package 规范 $\wr¬avspec$；精炼上下文 $\wr¬context$；核心索引（即工作执行所在的核心）$\wr¬core$；授权器哈希 $\wr¬authorizer$ 和追踪 $\wr¬authtrace$；段根查找字典 $\wr¬srlookup$；Is-Authorized 调用期间消耗的 gas $\wr¬authgasused$；以及最终的 work-digest $\wr¬digests$，它由包中每个项目的评估结果及一些关联数据组成。形式化定义如下：
+\begin{equation}
+  \label{eq:workreport}
+  \workreport \equiv \tuple{
+    \begin{aligned}
+      &\isa{\wr¬avspec}{\avspec},\\
+      \isa{\wr¬context}{\workcontext},\\
+      \isa{\wr¬core}{\coreindex},\\
+      \isa{\wr¬authorizer}{\hash},\\
+      \isa{\wr¬authtrace}{\blob},\\
+      &\isa{\wr¬srlookup}{\dictionary{\hash}{\hash}},\\
+      \isa{\wr¬digests}{\sequence[1:\Cmaxpackageitems]{\workdigest}},\\
+      \isa{\wr¬authgasused}{\gas}
+    \end{aligned}
+  }
+\end{equation}
+
+我们将段根查找字典中的项目数与先决条件数之和限制为 $\Cmaxreportdeps = 8$：
+\begin{equation}
+  \label{eq:limitreportdeps}
+  \forall \wrX \in \workreport : \len{\wrX_\wr¬srlookup} + \len{(\wrX_\wr¬context)_\wc¬prerequisites} \le \Cmaxreportdeps
+\end{equation}
+
+\subsubsection{精炼上下文（Refinement Context）}
+
+\emph{refinement context}（精炼上下文），由集合 $\workcontext$ 表示，描述报告对应 work-package 被评估时的链上上下文。它标识了两个历史区块：\emph{anchor}（锚点），包含头部哈希 $\wc¬anchorhash$、时间槽 $\wc¬anchortime$、后验状态根 $\wc¬anchorpoststate$ 和累积输出日志超级峰值 $\wc¬anchoraccoutlog$；以及 \emph{lookup-anchor}（查找锚点），包含头部哈希 $\wc¬lookupanchorhash$、时间槽 $\wc¬lookupanchortime$ 和后验状态根 $\wc¬lookupanchorpoststate$。最后，它标识了任何先决 work-package 的哈希 $\wc¬prerequisites$。形式化定义如下：
+\begin{equation}
+  \label{eq:workcontext}
+  \workcontext \equiv \tuple{\,\begin{alignedat}{5}
+    \isa{\wc¬anchorhash&}{\hash}\,,\;
+    \isa{&\wc¬anchortime&}{\timeslot}\,,\;
+    \isa{&\wc¬anchorpoststate&}{\hash}\,,\;
+    \isa{&\wc¬anchoraccoutlog&}{\hash}\,,\;\\
+    \isa{\wc¬lookupanchorhash&}{\hash}\,,\;
+    \isa{&\wc¬lookupanchortime&}{\timeslot}\,,\;
+    \isa{&\wc¬lookupanchorpoststate&}{\hash}\,,\;
+    \isa{&\wc¬prerequisites&}{\protoset{\hash}}
+  \end{alignedat}}
+\end{equation}
+
+\subsubsection{可用性（Availability）}
+我们将 \emph{availability specification}（可用性规范）集合 $\avspec$ 定义为一个元组，包含：work-package 的哈希 $\as¬packagehash$，可审计的工作包长度 $\as¬bundlelen$（详见第 \ref{sec:availabiltyspecifier} 节），以及擦除根 $\as¬erasureroot$、擦除编码分片总数 $\as¬erasureshards$、段根 $\as¬segroot$ 和段计数 $\as¬segcount$。work-report 包含此可用性规范，以确保原始 work-package 能够被正确重建，并且所声称的后果可以被审计。形式化定义如下：
+\begin{align}
+  \label{eq:avspec}
+  \avspec &\equiv \tuple{
+    \isa{\as¬packagehash}{\hash}\,,\;
+    \isa{\as¬bundlelen}{\bloblength}\,,\;
+    \isa{\as¬erasureroot}{\hash}\,,\;
+    \isa{\as¬erasureshards}{\valcount}\,,\;
+    \isa{\as¬segroot}{\hash}\,,\;
+    \isa{\as¬segcount}{\N}
+  }
+\end{align}
+
+\emph{erasure-root}（擦除根）（$\as¬erasureroot$）是一个二叉 Merkle 树的根，其叶节点是对 work-package 包和导出段进行擦除编码产生的 $\as¬erasureshards$ 个分片。由于每个分片分发给一个保证者，分片数量必须等于保证验证者集合的大小。擦除根作为报告审计和后续 work-package 可能需要检索的任何数据的承诺。因此，它被保证者用来验证他们从 guarantor 收到的数据的正确性，随后由审计者验证其正确性。完整讨论见第 \ref{sec:workpackagesandworkreports} 节。
+
+\emph{segment-root}（段根）（$\as¬segroot$）是一个恒定深度、左偏和零哈希填充的二叉 Merkle 树的根，它承诺了每个 work-item 的每个导出段的哈希。这些被 guarantor 用来验证他们被要求导入以评估后续 work-package 的任何重建段的正确性。也在第 \ref{sec:workpackagesandworkreports} 节中讨论。
+
+\subsubsection{工作摘要（Work Digest）}
+我们最终定义一个 \emph{work-digest}（工作摘要），$\workdigest$，它是通过 work-package 内完成的计算来改变服务状态的数据通道。
+\begin{equation}
+  \label{eq:workdigest}
+  \workdigest \equiv \tuple{
+    \begin{alignedat}{9}
+      \isa{\wd¬serviceindex&}{\serviceid}\,,\;
+      \isa{&\wd¬codehash&}{\hash}\,,\;
+      \isa{&\wd¬payloadhash&}{\hash}\,,\;
+      \isa{&\wd¬gaslimit&}{\gas}\,,\;
+      \isa{&\wd¬result&}{\blob \cup \workerror}\,,\;\\
+      \isa{\wd¬gasused&}{\gas}\,,\;
+      \isa{&\wd¬importcount&}{\N}\,,\;
+      \isa{&\wd¬xtcount&}{\N}\,,\;
+      \isa{&\wd¬xtsize&}{\N}\,,\;
+      \isa{&\wd¬exportcount&}{\N}
+    \end{alignedat}
+  }
+\end{equation}
+
+work-digest 是一个包含多个项目的元组。首先是 $\wd¬serviceindex$，即其状态将被改变的服务索引，其精炼代码已经执行。我们在报告时包含了服务代码的哈希 $\wd¬codehash$，根据方程 \ref{eq:reportcodesarecorrect}，它必须在 work-report 中被准确预测。
+
+接下来是工作项中在精炼阶段执行以得到此结果的有效载荷哈希（$\wd¬payloadhash$）。这没有直接的相关性，但它是提供给服务累积逻辑的信息。随后是执行此项目累积的 gas 限制 $\wd¬gaslimit$。
+
+还有工作 \emph{result}（结果），即代码执行的输出 blob 或错误，$\wd¬result$，在成功的情况下可以是八位字节序列，或者如果不成功则是集合 $\workerror$ 的成员。后一个集合定义为可能错误的集合，形式化定义如下：
+\begin{equation}
+  \label{eq:workerror}
+  \workerror \in \set{ \oog, \panic, \badexports, \oversize, \token{BAD}, \token{BIG} }
+\end{equation}
+
+前两个是关于虚拟机执行的特殊值，$\oog$ 表示 gas 不足错误，$\panic$ 表示意外的程序终止。其余四个中，第一个表示导出数量报告无效，第二个表示摘要（精炼输出）大小将超过可接受限制，第三个表示服务代码在查找锚点区块的后验状态中不可用。第四个表示代码可用但超过了允许的最大大小 $\Cmaxservicecodesize$。
+
+最后，我们有五个字段描述此工作负载在核心上产生结果所施加的活动水平。我们包括 $\wd¬gasused$（精炼期间实际使用的 gas）；$\wd¬importcount$ 和 $\wd¬exportcount$（分别从 D$^3$L 导入和导出到 D$^3$L 的段数）；以及 $\wd¬xtcount$ 和 $\wd¬xtsize$（计算工作负载时使用的外部交易数量和总大小（以八位字节计））。有关这些值含义的更多信息，请参见第 \ref{sec:workpackagesandworkreports} 节。
+
+为了确保区块外部交易空间的公平使用，work-report 限制了成功精炼输出 blob 与授权器追踪的最大总大小，从而有效限制了其整体大小：
+\begin{align}
+  \label{eq:limitworkreportsize}
+  \forall \wrX \in \workreport &:
+    \len{\wrX_\wr¬authtrace} + \sum\limits_{i=0}^{i<\len{\wrX_\wr¬digests}} L(\wrX_\wr¬digests\subb{i}_\wd¬result) \le \Cmaxreportvarsize \\
+  L(\wd¬result \in \blob \cup \workerror) &\equiv \begin{cases}
+    \len{\wd¬result} &\when \wd¬result \in \blob \\
+    0 &\otherwise
+  \end{cases} \\
+  \Cmaxreportvarsize &\equiv 48\cdot2^{10}
+\end{align}
+
+
+
+
+
+\subsection{包可用性保证（Package Availability Assurances）}
+
+我们首先定义 $\availassignmentspostassurances$，即接下来在第 \ref{sec:workreportguarantees} 节中使用的中间状态，以及 $\justbecameavailable$（可用 work-report 的集合），我们将在第 \ref{sec:accumulation} 节中使用。两者都需要整合来自 assurance 外部交易 $\xtassurances$ 的信息。
+
+\subsubsection{Assurance 外部交易（The Assurances Extrinsic）}
+Assurance 外部交易是一系列 \emph{assurance} 值，每个验证者最多一个。每个 assurance 是一个二进制值序列（即比特串），每个核心一个，附带签名和进行保证的验证者索引。在任意给定索引处值为 $1$（如果解释为布尔值则为 $\top$）意味着该验证者保证他们正在为其可用性做出贡献。\footnote{这是一个"软"暗示，因为如果不诚实报告在链上没有后果。有关此暗示的更多信息，请参见第 \ref{sec:assurance} 节。}形式化定义如下：
+\begin{align}
+  \label{eq:xtassurances}
+  \xtassurances \in \sequence{\tuple{
+    \isa{\xa¬anchor}{\hash},\,
+    \isa{\xa¬availabilities}{\bitstring[\Ccorecount]},\,
+    \isa{\xa¬assurer}{\Nmax{\len{\activeset}}},\,
+    \isa{\xa¬signature}{\edsignaturebase}
+  }}
+\end{align}
+
+所有 assurance 必须锚定在父区块上，并按验证者索引排序：
+\begin{align}
+  \forall a &\in \xtassurances : a_\xa¬anchor = \H_\¬parent \\
+  \forall i &\in \set{ 1 \dots \len{\xtassurances} } : \xtassurances\subb{i - 1}_\xa¬assurer < \xtassurances\subb{i}_\xa¬assurer
+\end{align}
+
+签名必须是公钥为进行保证的验证者的公钥，消息为父哈希 $\H_\¬parent$ 和前述比特串的序列化的签名：
+\begin{align}
+  \label{eq:assurancesig}
+  &\forall a \in \xtassurances : a_\xa¬signature \in \edsignature{\activeset\subb{a_\xa¬assurer}_\vk¬ed}{\Xavailable \concat \blake{\encode{\H_\¬parent, a_\xa¬availabilities}}} \\
+  &\Xavailable \equiv \token{\$jam\_available}
+\end{align}
+
+只有对应核心有可用性分配时才能设置比特位：
+\begin{equation}
+  \forall a \in \xtassurances, \cX \in \coreindex :
+  \quad a_\xa¬availabilities\subb{\cX} \Rightarrow \availassignmentspostjudgment\subb{\cX} \ne \none
+\end{equation}
+
+\subsubsection{可用报告（Available Reports）}
+当且仅当有明确的 \twothirds 超级多数验证者在区块的 assurance 外部交易中将该核心标记为已设置时，work-report 才被称为 \emph{available}（可用的）。形式化地，我们将新可用的 work-report 序列 $\justbecameavailable$ 定义为：
+\begin{align}
+  \label{eq:availableworkreports}
+  \justbecameavailable &\equiv \sq{\build{
+      (\availassignmentspostjudgment\subb{\cX}_\aa¬guarantee)_\g¬workreport
+    }{
+      \cX \orderedin \coreindex,\;
+      \sum_{a \in \xtassurances}\!a_\xa¬availabilities\subb{\cX}\,>\,\twothirds\,\len{\activeset}
+    }}
+\end{align}
+
+此值用于 $\accountspost$ 和 $\availassignmentspostassurances$ 的定义中，我们即将定义后者等价于 $\availassignmentspostjudgment$，但移除了现在可用或已超时的项目：
+\begin{equation}
+  \label{eq:availassignmentspostassurancesdef}
+  \begin{aligned}
+    \forall \cX \in \coreindex: \availassignmentspostassurances\subb{\cX} \equiv {} &\begin{cases}
+      \none &\when p = \none \vee (p_\aa¬guarantee)_\g¬workreport \in \justbecameavailable \vee {} \\
+      &\phantom{\when} \H_\¬timeslot \ge p_\aa¬timestamp + \Cassurancetimeoutperiod \vee \len{\activeset} \ne \len{\activeset'} \\
+      p &\otherwise
+    \end{cases} \\
+    &\where p = \availassignmentspostjudgment\subb{\cX}
+  \end{aligned}
+\end{equation}
+
+注意，当活动验证者密钥集合 $\activeset$ 的大小发生变化时，所有项目都会被清除。以此方式清除的项目可以被视为提前超时。
+
+
+
+\subsection{Guarantor 分配（Guarantor Assignments）}\label{sec:coresandvalidators}
+
+如第 \ref{sec:coremodelandservices} 节所讨论的，核内计算的可能规模随验证者节点的数量而扩展。具体而言，虽然有固定数量的核心 $\Ccorecount = 341$，但只有前 $\nicefrac{\len{\activeset'}}{3}$ 个是 \emph{active}（活跃的）且能够处理 work-package。
+
+每个区块中，每个活跃核心都有三个验证者被唯一分配来为其保证 work-report。分配给每个验证者的核心索引以及验证者的密钥由 $\guarantorassignments$ 表示：
+\begin{equation}
+  \guarantorassignments \in \tuple{\sequence[\len{\activeset'}]{\coreindex}, \sequence[\len{\activeset'}]{\valkey}}
+\end{equation}
+
+我们通过使用纪元熵和周期性轮换来确定任何给定验证者被分配到的核心，以帮助保护网络的安全性和活跃性。我们使用 $\entropy_2$ 而不是 $\entropy_1$ 作为纪元熵，以避免在纪元结束时链状态的不确定性可能导致两个已建立的分叉在自然解决之前出现的分叉放大问题。
+
+我们定义轮换函数 $R$、排列函数 $P$ 以及最终的 guarantor 分配 $\guarantorassignments$ 如下：
+\begin{align}
+  R(\mathbf{c}, n) &\equiv \sq{\build{(x + n) \bmod \frac{\len{\mathbf{c}}}{3}}{x \orderedin \mathbf{c}}}\\
+  P(v, e, t) &\equiv R\left(
+    \fyshuffle{\sq{\build{\ffrac{i}{3}}{i \orderedin \Nmax{v}}}, e},
+    \ffrac{t \bmod \Cepochlen}{\Crotationperiod}
+  \right)\\
+  \guarantorassignments &\equiv \tup{P(\len{\activeset'}, \entropy'_2, \thetime'), \Phi(\activeset')}
+\end{align}
+
+我们还定义 $\guarantorassignmentsunderlastrotation$，它等价于在上一次轮换下 $\guarantorassignments$ 的值：
+\begin{equation}
+  \label{eq:priorassignments}
+  \begin{aligned}
+    \using \tup{\mathbf{k}, e} &= \begin{cases}
+      \tup{\activeset', \entropy'_2} &\when \displaystyle\ffrac{\thetime' - \Crotationperiod}{\Cepochlen} = \ffrac{\thetime'}{\Cepochlen}\\
+      \tup{\previousset', \entropy'_3} &\otherwise
+    \end{cases} \\
+    \guarantorassignmentsunderlastrotation &\equiv \tup{
+      P(\len{\mathbf{k}}, e, \thetime' - \Crotationperiod),
+      \Phi(\mathbf{k})
+    }
+  \end{aligned}
+\end{equation}
+
+
+
+
+\subsection{工作报告保证（Work Report Guarantees）}\label{sec:workreportguarantees}
+
+我们首先定义 $\guarantee$，即 \emph{guarantees}（保证）的集合。一个保证是一个 \emph{work-report} $\g¬workreport$、一个凭证 $\g¬credential$ 及其对应的时间槽 $\g¬timeslot$ 的元组。凭证是一个由两个或三个（唯一验证者索引和签名）元组组成的序列。形式化定义如下：
+\begin{equation}
+  \label{eq:guarantee}
+  \guarantee \equiv \tuple{
+    \isa{\g¬workreport}{\workreport},\,
+    \isa{\g¬timeslot}{\timeslot},\,
+    \isa{\g¬credential}{\sequence[2:3]{\tuple{\N, \edsignaturebase}}}
+  }
+\end{equation}
+
+我们继续定义 guarantee 外部交易 $\xtguarantees$，即一系列保证。$\xtguarantees$ 中每个保证的核心索引必须唯一，且保证必须按此升序排列。形式化定义如下：
+\begin{align}
+  \xtguarantees &\in \sequence[:\Ccorecount]{\guarantee} \label{eq:guaranteesextrinsic} \\
+  \xtguarantees &= \sqorderuniqby{(\gX_\g¬workreport)_\wr¬core}{\gX \in \xtguarantees}
+\end{align}
+
+凭证必须按验证者索引排序：
+\begin{align}
+  \forall g &\in \xtguarantees : g_\g¬credential = \sqorderuniqby{v}{\tup{v, s} \in g_\g¬credential}
+\end{align}
+
+签名必须是公钥为凭证中标识的验证者的公钥，消息为 work-report 哈希的序列化的签名。签名的验证者必须在给定时间槽 $\g¬timeslot$ 被分配到该核心，该时间槽必须与本区块的时间槽在同一轮换中或在上一次轮换中。即使使用前一轮换中的时间槽且核心当时是活跃的，也不允许使用非活跃核心。形式化定义如下：
+\begin{gather}
+  \label{eq:guarantorsig}
+  \begin{aligned}
+    &\begin{aligned}
+      \forall \tup{\g¬workreport, \g¬timeslot, \g¬credential} &\in \xtguarantees,\\
+      \forall \tup{v, s} &\in \g¬credential
+    \end{aligned} : \abracegroup[\,]{
+      &v < \len{\mathbf{k}} \wedge \mathbf{c}\sub{v} = \g¬workreport_\wr¬core < \frac{\len{\activeset'}}{3}\\
+      &s \in \edsignature{(\mathbf{k}\sub{v})_\vk¬ed}{\Xguarantee\concat\blake{\g¬workreport}}\\
+      &\Crotationperiod(\floor{\nicefrac{\thetime'}{\Crotationperiod}} - 1) \le \g¬timeslot \le \thetime'
+    }\\
+    &k \in \reporters \Leftrightarrow \exists \tup{\g¬workreport, \g¬timeslot, \g¬credential} \in \xtguarantees, \exists \tup{v, s} \in \g¬credential: k = (\mathbf{k}\sub{v})_\vk¬ed\\
+    &\quad\where \tup{\mathbf{c}, \mathbf{k}} = \begin{cases}
+      \guarantorassignments &\when \displaystyle \ffrac{\thetime'}{\Crotationperiod} = \ffrac{t}{\Crotationperiod} \\
+      \guarantorassignmentsunderlastrotation &\otherwise
+    \end{cases}
+  \end{aligned}\\
+  \Xguarantee \equiv \token{\$jam\_guarantee}
+\end{gather}
+
+我们注意到，其签名出现在凭证中的每个验证者的 Ed25519 密钥被放置在 \emph{reporters} 集合 $\reporters$ 中。这被验证者活动统计簿记系统第 \ref{sec:bookkeeping} 节使用。
+
+\newcommand*{\local¬incomingcontexts}{\mathbf{x}}
+\newcommand*{\local¬incomingpackagehashes}{\mathbf{p}}
+
+我们用 $\incomingreports$ 表示当前外部交易 $\theextrinsic$ 中的 work-report 集合：
+\begin{align}\label{eq:incomingworkreports}
+  \using\incomingreports = \set{ \build { \gX_\g¬workreport }{ \gX \in \xtguarantees } }
+\end{align}
+
+每个报告的擦除编码分片总数必须与活跃验证者的数量匹配：
+\begin{equation}
+  \forall \wrX \in \incomingreports : (\wrX_\wr¬avspec)_\as¬erasureshards = \len{\activeset'}
+\end{equation}
+
+不得对已有可用性分配的核心放置保证。保证仅在报告的授权器哈希存在于报告核心的授权器池中时才有效。形式化定义如下：
+\begin{equation}\label{eq:reportcoresareunused}
+  \forall \wrX \in \incomingreports :
+    \availassignmentspostassurances\subb{\wrX_\wr¬core} = \none \wedge \wrX_\wr¬authorizer \in \authpool\subb{\wrX_\wr¬core}
+\end{equation}
+
+我们要求每个 work-report 中每个 work-digest 的累积 gas 分配满足其服务的最低 gas 要求。我们还要求所有 work-report 的总分配累积 gas 不超过整体 gas 限制 $\Creportaccgas$：
+\begin{equation}
+  \forall \wrX \in \incomingreports:
+    \sum_{\wdX \in \wrX_\wr¬digests}\!(\wdX_\wd¬gaslimit) \le \Creportaccgas \ \wedge \
+    \forall \wdX \in \wrX_\wr¬digests: \wdX_\wd¬gaslimit \ge \accounts\subb{\wdX_\wd¬serviceindex}_\sa¬minaccgas
+\end{equation}
+
+
+
+
+\subsubsection{报告的上下文有效性（Contextual Validity of Reports）}\label{sec:contextualvalidity}
+
+为方便起见，我们定义两个等价关系 $\local¬incomingcontexts$ 和 $\local¬incomingpackagehashes$，分别表示外部交易中所有上下文和 work-package 哈希的集合：
+\begin{equation}
+    \using \local¬incomingcontexts \equiv \set{ \build { \wrX_\wr¬context }{ \wrX \in \incomingreports } }\ ,\quad
+    \local¬incomingpackagehashes \equiv \set{ \build { (\wrX_\wr¬avspec)_\as¬packagehash }{ \wrX \in \incomingreports } }
+\end{equation}
+
+不得有重复的 work-package 哈希（即同一包的两个 work-report）。因此，我们要求 $\local¬incomingpackagehashes$ 的基数等于 work-report 序列 $\incomingreports$ 的长度：
+\begin{equation}
+  \len{\local¬incomingpackagehashes} = \len{\incomingreports}
+\end{equation}
+
+我们要求锚点区块在最近 $\Crecenthistorylen$ 个区块内，并且通过确保它出现在我们最近的区块 $\recenthistorypostparentstaterootupdate$ 中来确认其细节正确：
+\begin{align}
+  \forall x \in \local¬incomingcontexts : \exists y \in \recenthistorypostparentstaterootupdate : x_\wc¬anchorhash = y_\rh¬headerhash \wedge x_\wc¬anchorpoststate = y_\rh¬stateroot \wedge x_\wc¬anchoraccoutlog = y_\rh¬accoutlogsuperpeak \wedge x_\wc¬anchortime = y_\rh¬timeslot \!\!\!\!\!\!
+\end{align}
+
+我们要求每个查找锚点区块在最近 $\Cmaxlookupanchorage$ 个时间槽内：
+\begin{align}
+  \label{eq:limitlookupanchorage}
+  \forall x \in \local¬incomingcontexts :\ x_\wc¬lookupanchortime \ge \H_\¬timeslot - \Cmaxlookupanchorage
+\end{align}
+
+我们还要求我们有它的记录；这是少数不能纯粹通过链上状态检查的条件之一，必须通过保留最近 $\Cmaxlookupanchorage$ 个头部的序列作为祖先集合 $\ancestors$ 来检查。由于它是通过头部链确定的，因此仍然是确定性的和可计算的。形式化定义如下：
+\begin{equation}
+  \forall x \in \local¬incomingcontexts : \exists h, h' \in \ancestors : \bigwedge \abracegroup{
+    h_\¬timeslot &= x_\wc¬lookupanchortime \\
+    \blake{h} &= x_\wc¬lookupanchorhash \\
+    h'_\¬parent &= \blake{h} \\
+    h'_\¬priorstateroot &= x_\wc¬lookupanchorpoststate
+  }
+\end{equation}
+
+我们要求报告的 work-package 不能是过去某个其他报告的 work-package。我们确保 work-package 不出现在我们管道中的任何位置。形式化定义如下：
+\begin{align}
+  &\using \mathbf{q} = \set{\build{
+      (\wrX_\wr¬avspec)_\as¬packagehash
+    }{
+      \tup{\wrX, \mathbf{d}} \in \concatall{\ready}
+    }} \\
+  &\using \mathbf{a} = \set{\build{
+      (((\aaX_\aa¬guarantee)_\g¬workreport)_\wr¬avspec)_\as¬packagehash
+    }{
+      \aaX \in \availassignments, \aaX \ne \none
+    }} \\
+  &\forall p \in \local¬incomingpackagehashes,
+    p \not\in \bigcup_{x \in \recenthistory}\keys{x_\rh¬reportedpackagehashes}
+      \cup
+      \bigcup_{x \in \accumulated}x
+      \cup \mathbf{q}
+      \cup \mathbf{a}
+\end{align}
+
+我们要求，如果存在先决 work-package，以及段根查找中提到的任何 work-package，必须在外部交易中或在我们最近的历史中。
+\begin{align}
+  &\begin{aligned}
+    &\forall \wrX \in \incomingreports,
+    \forall p \in (\wrX_\wr¬context)_\wc¬prerequisites \cup
+      \keys{\wrX_\wr¬srlookup} :\\
+    &\quad p \in \local¬incomingpackagehashes \cup \set{
+      \build{x}{x \in \keys{b_\rh¬reportedpackagehashes},\, b \in \recenthistory}}
+  \end{aligned}
+\end{align}
+
+我们要求段根查找中提到的任何段根都必须基于我们最近的工作包历史和当前区块验证为正确：
+\begin{align}
+  &\using \local¬incomingpackagehashes = \set{ \build {
+    \kv{
+      ((g_\g¬workreport)_\wr¬avspec)_\as¬packagehash
+    }{
+      ((g_\g¬workreport)_\wr¬avspec)_\as¬segroot
+    }
+  }{
+    g \in \xtguarantees
+  } } \\
+  &\forall \wrX \in \incomingreports: \wrX_\wr¬srlookup \subseteq \local¬incomingpackagehashes \cup \bigcup_{b \in \recenthistory} b_\rh¬reportedpackagehashes
+\end{align}
+
+（注意，这些检查留下了接受看似存在依赖循环的 work-report 的可能性。我们不认为这是一个问题：预累积阶段有效地保证了在这些情况下永远不会发生累积，报告会被简单地忽略。）
+
+最后，我们要求外部交易中的所有 work-digest 都为其对应的服务预测了正确的代码哈希：
+\begin{align}\label{eq:reportcodesarecorrect}
+  \forall \wrX \in \incomingreports, \forall \wdX \in \wrX_\wr¬digests : \wdX_\wd¬codehash = \accounts\subb{\wdX_\wd¬serviceindex}_\sa¬codehash
+\end{align}
+
+
+
+
+\subsection{报告的转换（Transitioning for Reports）}
+
+我们定义 $\availassignmentspostguarantees$ 等价于 $\availassignmentspostassurances$，但外部交易替换了条目的情况除外。在条目被替换的情况下，新值包含当前时间 $\thetime'$，以便在未能及时变为可用时可以被清除（参见方程 \ref{eq:availassignmentspostassurancesdef}）。
+\begin{equation}
+    \forall \cX \in \coreindex : \availassignmentspostguarantees\subb{\cX} \equiv \begin{cases}
+      \tup{\aa¬guarantee,\,\is{\aa¬timestamp}{\thetime'}} &\when \exists \aa¬guarantee \in \xtguarantees, (\aa¬guarantee_\g¬workreport)_\wr¬core = \cX \\
+      \availassignmentspostassurances\subb{\cX} &\otherwise
+    \end{cases}
+\end{equation}
+
+值得注意的是，$\availassignmentspostguarantees\subb{\cX}$ 对于 $\cX \ge \nicefrac{\len{\activeset'}}{3}$ 总是 $\none$；这特别确保了我们永远不会有多于活跃验证者数量可以安全管理的待审计报告。
+
+至此，报告与保证部分结束。我们现在有了 $\availassignmentspostguarantees$ 和 $\justbecameavailable$ 的完整定义，将在第 \ref{sec:accumulation} 节中使用，该节描述了 work-report 被保证和变为可用后发生的状态转换部分。
+
+

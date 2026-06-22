@@ -1,0 +1,39 @@
+\section{Grandpa 与最优链 (Grandpa and the Best Chain)}\label{sec:bestchain}\label{sec:grandpa}
+
+节点参与由 \cite{stewart2020grandpa} 定义的 \textsc{Grandpa} 协议。
+
+\newcommand*{\final}{\natural}
+\newcommand*{\best}{\flat}
+
+我们将最新已终结区块定义为 $\block^\final$。所有与区块和状态相关的项同样添加上标。我们认为\emph{最优区块} $\block^\best$ 是从满足以下标准的可接受区块集合中选出的：
+
+\begin{itemize}
+  \item 以已终结区块为祖先。
+  \item 不包含任何未终结区块中出现的等价情况（同一时隙的两个有效区块）。
+  \item 被视为已审计。
+\end{itemize}
+
+形式上：
+\begin{align}
+  \ancestors(\header^\best) &\owns \header^\final \\
+  \isaudited^\best &\equiv \top \\
+  \not\exists \header^A, \header^B &: \bigwedge \abracegroup[\,]{
+    \header^A &\ne \header^B \\
+    \header^A_\¬timeslot &= \header^B_\¬timeslot \\
+    \header^A &\in \ancestors(\header^\best) \\
+    \header^A &\not\in \ancestors(\header^\final)
+  }
+\end{align}
+
+在这些可接受的区块中，应选择包含最多使用时隙密封器票据（而非后备密钥）的作者的祖先区块的区块作为最优链头，从而作为参与者应进行 \textsc{Grandpa} 投票的链。
+
+形式上，我们的目标是选择 $\block^\best$ 以最大化 $m$ 的值，其中：
+\begin{equation}
+  m = \sum_{\header^A \in \ancestors^\best} \isticketed^A
+\end{equation}
+
+在 \textsc{Grandpa} 中投票的具体数据应为最优区块 $\block^\best$ 的区块头，连同其\emph{后验}状态根 $\merklizestate{\thestate'}$。状态根与 \textsc{Grandpa} 协议没有直接关系，但在投票/签名过程中与区块头一起包含，以确保利用 \textsc{Grandpa} 输出的系统能够验证尽可能最新的链状态。
+
+这意味着在 \textsc{Grandpa} 投票发生以终结区块时，后验状态必须是已知的。然而，由于 \textsc{Grandpa} 主要用于状态根验证，终结一个没有关联后验状态承诺的区块意义不大。
+
+后验状态仅在以下情况下影响 \textsc{Grandpa} 投票：对相同区块哈希但关联不同后验状态根的投票被视为对不同区块的投票。这只会在节点行为不当或本文档存在歧义的情况下发生。

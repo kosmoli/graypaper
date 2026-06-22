@@ -1,0 +1,283 @@
+\section{区块生产和链增长（Block Production and Chain Growth）}
+\label{sec:blockproduction}
+
+如前所述，\Jam 围绕混合共识机制构建，性质上类似于 Polkadot 的 \textsc{Babe}/\textsc{Grandpa} 混合机制。\Jam 的区块生产机制，以 Safrole 命名，取自其简化变体的新 Sassafras 生产机制，是一个有状态系统，比\emph{YP}中描述的 Nakamoto 共识复杂得多。
+
+区块生产共识机制的主要目的是限制新区块的编写速率，并且理想地排除"分叉"的可能性：即具有相同数量祖先的多个区块。
+
+为实现这一目标，Safrole 将任何给定六秒时隙内任何区块的可能编写者限制为预指定的\emph{验证者}序列中的单一密钥持有者。此外，在正常运行中，任何未来时隙的密钥持有者身份将具有非常高的匿名度。作为其操作的副产品，我们可以生成高质量的熵池，可供协议的其他部分使用，并可在其上运行的服务访问。
+
+由于其范围紧密的角色，Safrole 的核心状态 $\safrole$ 独立于协议的其余部分。它通过 $\stagingset$ 和 $\activeset$（分别是预期和活跃的验证者密钥序列）、$\thetime$（最近区块的时隙）和 $\entropy$（熵累积器）与协议的其他部分交互。
+
+Safrole 协议在每个纪元确定一次\emph{时隙密封序列} $\sealtickets$，包含 $\Cepochlen$ 个条目，每个纪元内每个潜在区块对应一个条目。在正常运行中，每个条目是一个\emph{票据}（ticket）：对某个时隙的匿名声明。每个区块头部包含其时隙索引 $\H_\¬timeslot$（自 \Jam 公历纪元开始以来的六秒期间数）和有效密封签名 $\H_\¬sealsig$，由持有对应于 $\sealtickets$ 中相关索引条目秘密密钥的验证者签署。每个票据实际上是某个验证者的假名，该验证者被授予在相应时隙编写区块的特权。
+
+为了在保持票据与验证者之间对应关系匿名的同时生成 $\sealtickets$，我们使用了一种基于 Bandersnatch 曲线构建的新型 Ring\textsc{vrf} 密码学方案。此方案允许验证者提供一个同时满足以下条件的证明：（1）保证编写者控制着验证者密钥序列中的一个密钥，（2）产生无偏的确定性哈希输出，给我们一个安全的可验证随机函数（\textsc{vrf}）。此匿名 \textsc{vrf} 输出是\emph{票据标识符}。验证者在整个纪元中提交其票据，将其累积到 $\ticketaccumulator$ 中。得分最高的票据随后被选中以填充下一纪元的时隙密封序列 $\sealtickets$，确定哪个验证者可以在每个相应时隙编写区块。
+
+
+\subsection{时间记录（Timekeeping）}
+\label{sec:timekeeping}
+
+此处，$\thetime$ 定义最近区块的时隙索引，我们将其转移到区块头部中定义的时隙索引：
+\begin{equation}
+  \label{eq:timeslotindex}
+  \thetime \in \timeslot \ ,\quad
+  \thetime' \equiv \H_\¬timeslot
+\end{equation}
+
+我们在状态中跟踪时隙索引为 $\thetime$，以便我们能够轻松地识别新纪元并确定先前区块编写的时隙。我们将 $e$ 表示为先前的纪元索引，$m$ 表示先前在该纪元内的时隙相位索引，$e'$ 和 $m'$ 是当前区块的对应值：
+\begin{align}
+  \mathrm{let}\quad e \remainder m = \frac{\thetime}{\Cepochlen} \,,\quad
+  e' \remainder m' = \frac{\thetime'}{\Cepochlen}
+\end{align}
+
+
+\subsection{Safrole 基本状态（Safrole Basic State）}
+\label{sec:safrolebasicstate}
+
+我们将 $\safrole$ 重新表述为若干组件：
+\begin{align}
+  \label{eq:consensusstatecomposition}
+  \safrole &\equiv \tuple{
+    \pendingset,\,
+    \epochroot,\,
+    \sealtickets,\,
+    \ticketaccumulator
+  }
+\end{align}
+
+$\epochroot$ 是纪元的根，是一个由下一纪元每个验证者的一个 Bandersnatch 密钥组合而成的 Bandersnatch 环根，定义在 $\pendingset$ 中（其本身在下一节中定义）。
+\begin{align}
+  \label{eq:epochrootspec}
+  \epochroot &\in \ringroot
+\end{align}
+
+最后，$\ticketaccumulator$ 是票据累积器，是用于下一纪元的最高得分票据标识符序列。$\sealtickets$ 是当前纪元的时隙密封序列，它是完整的 $\Cepochlen$ 个票据，或者在回退模式下是 $\Cepochlen$ 个 Bandersnatch 密钥的序列：
+\begin{align}
+  \label{eq:ticketaccumulatorsealticketsspec}
+  \ticketaccumulator \in \sequence[:\Cepochlen]{\safroleticket} \,,\quad
+  \sealtickets \in \sequence[\Cepochlen]{\safroleticket} \cup \sequence[\Cepochlen]{\bskey}
+\end{align}
+
+此处，$\safroleticket$ 用于表示\emph{票据}集合，是可验证随机票据标识符 $\st¬id$ 和票据条目索引 $\st¬entryindex$ 的组合：
+\begin{align}
+  \label{eq:ticket}
+  \safroleticket &\equiv \tuple{
+    \isa{\st¬id}{\hash},\,
+    \isa{\st¬entryindex}{\N}
+  }
+\end{align}
+
+如我们在第 \ref{sec:sealandentropy} 节所述，Safrole 要求每个区块头部 $\H$ 包含一个有效密封 $\H_\¬sealsig$，这是使用当前纪元时隙密封序列 $\sealtickets'$ 中索引 $m'$ 处条目对应私钥生成的 Bandersnatch 签名。
+
+
+\subsection{密钥轮换（Key Rotation）}
+\label{sec:keyrotation}
+
+除了活跃的验证者密钥序列 $\activeset$ 和暂存序列 $\stagingset$ 之外，在 Safrole 状态内部我们保留一个待定序列 $\pendingset$。活跃验证者密钥标识当前有特权编写区块和执行验证过程的节点，而待定密钥 $\pendingset$（在每个纪元开始时重置为 $\stagingset$）是将在下一纪元活跃并确定授权票据进入下一纪元时隙密封竞赛的 Bandersnatch 环根的密钥序列。每个序列的长度始终是 3 的倍数，在 6 到 $3\Ccorecount$ 之间。
+\begin{gather}
+  \label{eq:validatorkeys}
+  \stagingset \in \allvalkeys \;,\quad
+  \pendingset \in \allvalkeys \;,\quad
+  \activeset \in \allvalkeys \;,\quad
+  \previousset \in \allvalkeys \\
+  \label{eq:valcount}
+  \valcount \equiv \set{\build{3c}{c \in \Nclamp{2}{\Ccorecount+1}}}
+\end{gather}
+
+我们必须引入 $\valkey$，即验证者密钥元组集合。这是一组密码学公钥和元数据的组合，元数据是不透明的八位字节序列，但用于指定验证者的实际标识符，尤其是硬件地址。
+
+验证者密钥集合本身等价于 336 八位字节序列的集合。然而，为清晰起见，我们将序列分为四个易于表示的组件。对于任何验证者密钥 $k$，Bandersnatch 密钥记为 $k_\vk¬bs$，等价于前 32 个八位字节；Ed25519 密钥 $k_\vk¬ed$ 是第二个 32 个八位字节；\textsc{bls} 密钥记为 $k_\vk¬bls$ 等价于随后的 144 个八位字节，最后元数据 $k_\vk¬metadata$ 是最后 128 个八位字节。形式上：
+\begin{align}
+  \valkey &\equiv \blob[336] \\
+  \forall \vkX \in \valkey : \vkX_\vk¬bs \in \bskey &\equiv \vkX\subrange{0}{32} \\
+  \forall \vkX \in \valkey : \vkX_\vk¬ed \in \edkey &\equiv \vkX\subrange{32}{32} \\
+  \forall \vkX \in \valkey : \vkX_\vk¬bls \in \blskey &\equiv \vkX\subrange{64}{144} \\
+  \forall \vkX \in \valkey : \vkX_\vk¬metadata \in \metadatakey &\equiv \vkX\subrange{208}{128}
+\end{align}
+
+在新纪元常规条件下，验证者密钥被轮换，纪元的 Bandersnatch 环根更新为 $\epochroot'$：
+\begin{align}
+  \tup{\pendingset', \activeset', \previousset', \epochroot'} &\equiv \begin{cases}
+    (\Phi(\stagingset), \pendingset, \activeset, z) &\when e' > e \\ \tup{\pendingset, \activeset, \previousset, \epochroot} &\otherwise
+  \end{cases} \\
+  \nonumber \where z &= \getringroot{\sq{\build{k_\vk¬bs}{k \orderedin \pendingset'}}} \\
+  \label{eq:blacklistfilter} \Phi(\mathbf{k}) &\equiv \sq{
+    \build{
+      \begin{rcases}
+        \sq{0, 0, \dots} &\when \vkX_\vk¬ed \in \offenders' \\
+        \vkX &\otherwise
+      \end{rcases}
+    }{
+      \vkX \orderedin \mathbf{k}
+    }
+  }
+\end{align}
+
+注意，在纪元变更时，后排队的验证者密钥序列 $\pendingset'$ 被定义为属于违规者 $\offenders'$ 的传入密钥被替换为仅包含零的空密钥。违规者的来源在第 \ref{sec:disputes} 节中解释。
+
+
+\subsection{密封和熵累积（Sealing and Entropy Accumulation）}
+\label{sec:sealandentropy}
+
+头部必须包含有效密封和有效熵源。这是两个 \textsc{vrf} 签名，都使用当前时隙对应的时隙密封序列条目的私钥；前者的消息数据是头部的序列化，省略了密封组件 $\H_\¬sealsig$，而后者用作抗偏熵源，因此其消息必须已经固定：我们使用来自密封签名 \textsc{vrf} 的熵。形式上：
+\begin{align}
+  \nonumber \using i = \cyclic{\sealtickets'[\H_\¬timeslot]}\colon \\
+  \label{eq:ticketconditiontrue}
+  \sealtickets' \in \sequence{\safroleticket} &\implies \abracegroup[\,]{
+      &i_\st¬id = \banderout{\H_\¬sealsig}\,,\\
+      &\H_\¬sealsig \in \bssignature{\H_\¬authorbskey}{\Xticket \concat \entropy'_3 \append i_\st¬entryindex}{\encodeunsignedheader{\H}}\,,\\
+      &\isticketed = 1
+  }\\
+  \label{eq:ticketconditionfalse}
+  \sealtickets' \in \sequence{\bskey} &\implies \abracegroup[\,]{
+      &i = \H_\¬authorbskey\,,\\
+      &\H_\¬sealsig \in \bssignature{\H_\¬authorbskey}{\Xfallback \concat \entropy'_3}{\encodeunsignedheader{\H}}\,,\\
+      &\isticketed = 0
+  }\\
+  \label{eq:vrfsigcheck}
+  \H_\¬vrfsig &\in \bssignature{\H_\¬authorbskey}{\Xentropy \concat \banderout{\H_\¬sealsig}}{\sq{}} \\
+  \Xentropy &= \token{\$jam\_entropy}\\
+  \Xfallback &= \token{\$jam\_fallback\_seal}\\
+  \Xticket &= \token{\$jam\_ticket\_seal}
+  \end{align}
+
+使用票据进行密封具有更高的安全性，我们在确定要扩展链的候选区块时利用此知识，详见第 \ref{sec:bestchain} 节。因此我们用布尔标记 $\isticketed$ 注明区块是在常规安全下密封的。我们定义此标记仅为了便于后续规范说明。
+
+除了熵累积器 $\entropyaccumulator$ 之外，我们保留累积器在最近三个结束的纪元点的三个额外历史值 $\entropy_1$、$\entropy_2$ 和 $\entropy_3$。其中第二老的 $\entropy_2$ 用于帮助确保未来熵是无偏的（见方程 \ref{eq:ticketsextrinsic}）并为回退时隙密封生成函数提供随机性种子（见方程 \ref{eq:slotkeysequence}）。最老的用于在验证上面的密封时重新生成此随机性（见方程 \ref{eq:ticketconditionfalse} 和 \ref{eq:ticketconditiontrue}）。
+\begin{align}
+  \label{eq:entropycomposition}
+  \entropy &\in \sequence[4]{\hash}
+\end{align}
+
+$\entropyaccumulator$ 定义了随机性累积器的状态，\textsc{vrf} 的可证明随机输出（对某个无偏输入的签名）在每个区块被组合到其中。同时 $\entropy_1$、$\entropy_2$ 和 $\entropy_3$ 按顺序保留此累积器在最近三个结束纪元结束时的状态。
+\begin{align}
+  \entropyaccumulator' &\equiv \blake{\entropyaccumulator \concat \banderout{\H_\¬vrfsig}}
+\end{align}
+
+在纪元转换时（识别为条件 $e' > e$），因此我们将累积器值轮换到历史 $\entropy_1$、$\entropy_2$ 和 $\entropy_3$ 中：
+\begin{align}
+  \tup{\entropy'_1, \entropy'_2, \entropy'_3} &\equiv \begin{cases}
+    \tup{\entropy_0, \entropy_1, \entropy_2} &\when e' > e \\
+    \tup{\entropy_1, \entropy_2, \entropy_3} &\otherwise
+  \end{cases}
+\end{align}
+
+
+\subsection{时隙密封序列（The Slot-Sealer Sequence）}
+\label{sec:slotkeysequence}
+
+后续时隙密封序列 $\sealtickets'$ 是三种表达式之一，取决于区块的情况。如果区块不是纪元中的第一个，则它保持与先前 $\sealtickets$ 不变。如果区块信号下一个纪元（通过纪元索引）且先前区块的时隙在前一纪元的结束期间内，则它取先前票据累积器 $\ticketaccumulator$ 的值。否则，它取回退密钥序列的值。形式上：
+\begin{align}
+  \label{eq:slotkeysequence}
+  \sealtickets' &\equiv \begin{cases}
+    Z(\ticketaccumulator) &\when e' = e + 1 \wedge m \geq \Cepochtailstart \wedge \len{\ticketaccumulator} = \Cepochlen\!\!\\
+    \sealtickets &\when e' = e \\
+    F(\entropy'_2, \activeset') \!\!\!&\otherwise
+  \end{cases}
+\end{align}
+
+此处，我们使用 $Z$ 作为从外到内的排序函数，定义如下：
+\begin{equation}
+  Z\colon\abracegroup[\,]{
+    \sequence[\Cepochlen]{\safroleticket} &\to \sequence[\Cepochlen]{\safroleticket}\\
+    \mathbf{s} &\mapsto \sq{\mathbf{s}_0, \mathbf{s}_{\len{\mathbf{s}} - 1}, \mathbf{s}_1, \mathbf{s}_{\len{\mathbf{s}} - 2}, \dots}\\
+  }
+\end{equation}
+
+最后，$F$ 是回退密钥序列函数，它使用链上收集的熵 $r$ 从验证者密钥序列 $\mathbf{k}$ 中选择一个纪元量的验证者 Bandersnatch 密钥（$\sequence[\Cepochlen]{\bskey}$）：
+\begin{equation}
+  \label{eq:fallbackkeysequence}
+  F\colon \abracegroup[\ ]{
+    \tuple{\hash,\,\sequence{\valkey}} &\to \sequence[\Cepochlen]{\bskey}\\
+    \tup{r,\, \mathbf{k}} &\mapsto \sq{\build{
+      \cyclic{\mathbf{k}\sub{\decode[4]{\blake{r \concat \encode[4]{i}}_{\dots 4}}}}_\vk¬bs
+    }{
+      i \in \epochindex
+    }}
+  }\!\!\!
+\end{equation}
+
+
+\subsection{标记（The Markers）}
+\label{sec:epochmarker}
+
+纪元和获奖票据标记是放置在头部中的信息，以最小化确定与任何给定纪元关联的验证者密钥所需的数据传输。它们对不为任何给定区块同步完整状态的节点特别有用，因为它们仅使用头部链即可促进对验证者密钥序列变化的安全跟踪。
+
+如前所述，头部的纪元标记 $\H_\¬epochmark$ 要么为空，要么如果区块是新纪元中的第一个，则为下一个和当前纪元随机性的元组，以及为每个验证者定义在下一纪元开始的验证者密钥的同时包含 Bandersnatch 密钥和 Ed25519 密钥的元组序列。形式上：
+\begin{align}
+  \label{eq:epochmarker}
+  \H_\¬epochmark &\equiv \begin{cases}
+    \tup{ \entropyaccumulator, \entropy_1, \sq{\build{
+      \tup{k_\vk¬bs, k_\vk¬ed}
+    }{
+      k \orderedin \pendingset'
+    }} } &\when e' > e \\
+    \none & \otherwise
+  \end{cases}
+\end{align}
+
+获奖票据标记 $\H_\¬winnersmark$ 要么为空，要么如果区块是票据提交期结束后第一个且票据累积器已饱和，则为最终的票据标识符序列。形式上：
+\begin{align}
+  \label{eq:winningticketsmarker}
+  \H_\¬winnersmark &\equiv \begin{cases}
+    Z(\ticketaccumulator) &\when e' = e \wedge m < \Cepochtailstart \le m' \wedge \len{\ticketaccumulator} = \Cepochlen \\
+    \none & \otherwise
+  \end{cases}
+\end{align}
+
+
+\subsection{外部数据和票据（The Extrinsic and Tickets）}
+\label{sec:safrolextandtickets}
+
+外部数据 $\xttickets$ 是有效票据证明的序列；票据意味着我们纪元性"竞赛"中的一个条目，以确定哪些验证者有特权为下一纪元的每个时隙编写区块。票据指定一个条目索引（小于每个验证者最大票据条目数的自然数，定义在方程 \ref{eq:ticketsextrinsic} 中）以及票据有效性的证明。该证明暗示一个票据标识符，即高熵无偏 32 八位字节序列，既用作上述竞赛中的分数，又用作区块熵源 $\textsc{vrf}$ 签名的输入。
+
+在纪元结束附近（\ie 从开始起 $\Cepochtailstart$ 个时隙），此竞赛被关闭，意味着同一纪元内的后续区块必须有空的票据外部数据。此时，下一纪元的时隙密封序列变得固定。
+
+我们将外部数据定义为有效票据证明的序列，每个证明是条目索引和票据有效性证明的元组。为确保累积器能够饱和，当验证者较少时，每个验证者被允许更多票据。形式上：
+\begin{align}
+  \label{eq:ticketsextrinsic}
+  \begin{split}
+    \xttickets &\in \sequence{\tuple{
+      \isa{\xt¬entryindex}{\Nmax{n}},\,
+      \isa{\xt¬proof}{\bsringproof{\epochroot'}{\Xticket \concat \entropy'_2 \append \xt¬entryindex}{\sq{}}}
+    }} \\
+    &\phantom{{}\in{}} \where n = \ceil{\frac{2\Cepochlen}{\len{\pendingset'}}}
+  \end{split} \\
+  \label{eq:enforceticketlimit}
+  \len{\xttickets} &\le \begin{cases}
+      \Cmaxblocktickets &\when m' < \Cepochtailstart \\
+      0 &\otherwise
+  \end{cases}
+\end{align}
+
+我们将 $\mathbf{n}$ 定义为新票据序列，票据标识符（一个哈希）定义为 Bandersnatch Ring\textsc{vrf} 证明的输出组件：
+\begin{align}
+  \mathbf{n} &\equiv \sq{\build{
+    \tup{
+      \is{\st¬id}{\banderout{i_\xt¬proof}},\,
+      \is{\st¬entryindex}{i_\st¬entryindex}
+    }
+  }{
+    i \orderedin \xttickets
+  }}
+\end{align}
+
+通过外部数据提交的票据必须已经按其隐含标识符排序。绝不允许重复标识符，以免验证者多次提交相同的票据：
+\begin{align}
+  \mathbf{n} &= \sqorderuniqby{x_\st¬id}{x \in \mathbf{n}} \\
+  \set{ \build{ x_\st¬id }{ x \in \mathbf{n} }} &\disjoint \set{ \build { x_\st¬id }{ x \in \ticketaccumulator }}
+\end{align}
+
+新票据累积器 $\ticketaccumulator'$ 通过将新票据合并到先前累积器值（或如果是新纪元则为空序列）中构建：
+\begin{equation}
+  \begin{aligned}
+    \ticketaccumulator' &\equiv  {\overrightarrow{\sqorderby{x_\st¬id}{x \in \mathbf{n} \cup \begin{cases} \none\ &\when e' > e \\ \ticketaccumulator\ &\otherwise \end{cases}~}}^\Cepochlen \\
+  \end{aligned}
+\end{equation}
+
+票据累积器的最大大小为 $\Cepochlen$。在每个区块，累积器成为先前累积器 $\ticketaccumulator$ 和提交票据排序联合的最小项。在外部数据中包含无用票据是无效的，因此所有提交的票据必须存在于其后续票据累积器中。形式上：
+\begin{align}
+  \mathbf{n} \subseteq \ticketaccumulator'
+\end{align}
+
+注意可以证明，在空外部数据 $\xttickets = \sq{}$（如 $m' \ge \Cepochtailstart$ 所暗示）和纪元不变（$e' = e$）的情况下，$\ticketaccumulator' = \ticketaccumulator$。

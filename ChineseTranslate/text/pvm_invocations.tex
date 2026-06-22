@@ -1,0 +1,1045 @@
+\section{虚拟机调用 (Virtual Machine Invocations)}\label{sec:virtualmachineinvocations}
+
+我们现在定义协议中希望调用 \textsc{pvm} 实例的三个实际场景。一般来说，我们在基本调用参数中避免引入无界数据，以最小化意外的大型 \textsc{ram} 分配的可能性，这可能导致 gas 膨胀和不可避免的下溢。这使得接口更加繁琐，但更加可预测且更容易推理。
+
+\subsection{宿主调用结果常量 (Host-Call Result Constants)}
+
+\begin{description}
+  \item[$\mathtt{NONE} = 2^{64} - 1$] 表示某项不存在的返回值。
+  \item[$\mathtt{WHAT} = 2^{64} - 2$] 名称未知。
+  \item[$\mathtt{OOB} = 2^{64} - 3$] 为读/写提供的内部 \textsc{pvm} 内存索引不可访问。
+  \item[$\mathtt{WHO} = 2^{64} - 4$] 索引未知。
+  \item[$\mathtt{FULL} = 2^{64} - 5$] 存储已满或资源已分配。
+  \item[$\mathtt{CORE} = 2^{64} - 6$] 核心索引未知。
+  \item[$\mathtt{CASH} = 2^{64} - 7$] 资金不足。
+  \item[$\mathtt{LOW} = 2^{64} - 8$] Gas 限制过低。
+  \item[$\mathtt{HUH} = 2^{64} - 9$] 操作无效。例如，该项已被请求、无法被遗忘，或服务权限不足。
+  \item[$\mathtt{OK} = 0$] 表示一般成功的返回值。
+\end{description}
+
+内部 \textsc{pvm} 调用有自己的一组结果码：
+\begin{description}
+  \item[$\mathtt{HALT} = 0$] 调用完成并正常停止。
+  \item[$\mathtt{PANIC} = 1$] 调用以 panic 完成。
+  \item[$\mathtt{FAULT} = 2$] 调用以页面错误完成。
+  \item[$\mathtt{HOST} = 3$] 调用以宿主调用错误完成。
+  \item[$\mathtt{OOG} = 4$] 调用因 gas 耗尽而完成。
+\end{description}
+
+注意，宿主调用请求退出的返回码是小于 $2^{64} - 13$ 的任何非零值。
+
+\subsection{授权检查调用 (Is-Authorized Invocation)}\label{sec:isauthorizedinvocation}
+
+授权检查调用是三个调用中最简单的一个，完全无状态。它仅提供用于检查其环境和参数的宿主调用函数。它仅接受应在哪个核心上执行的参数 $c$。形式上，它定义为 $\Psi_I$：
+\begin{align}
+  \label{eq:isauthinvocation}
+  \Psi_I &\colon \abracegroup{
+    \tuple{\workpackage, \coreindex} \to \tuple{\blob \cup \workerror, \gas} \\
+    \tup{\wpX, c} &\mapsto \begin{cases}
+      \tup{\token{BAD}, 0} &\when \wpX_\wp¬authcode = \none \\
+      \tup{\token{BIG}, 0} &\otherwhen \len{\wpX_\wp¬authcode} > \Cmaxauthcodesize \\
+      \tup{\mathbf{r}, u} &\otherwise \\
+      \multicolumn{2}{l}{\where \tup{u, \mathbf{r}, \none} = \Psi_M(\wpX_\wp¬authcode, 0, \Cpackageauthgas, \encode[2]{c}, F, \none)}\\
+    \end{cases}\\
+  } \\
+  \label{eq:isauthorizedmutator}F \in \contextmutator{\emset} &\colon
+    \tup{n, \gascounter, \registers, \memory} \mapsto \begin{cases}
+      \Omega_G(\gascounter, \registers, \memory) &\when n = \mathtt{gas} \\
+      \Omega_\Gemini(\gascounter, \registers, \memory, \wpX_\wp¬authcode) &\when n = \mathtt{grow\_heap} \\
+      \Omega_Y(\gascounter, \registers, \memory, \wpX, \none, \none, \none, \none, \none, \none, \none) &\when n = \mathtt{fetch} \\
+      \tup{\oog, \gascounter', \registers', \memory} &\otherwhen \gascounter' < 0 \\
+      \tup{\continue, \gascounter', \registers', \memory} &\otherwise \\
+      \multicolumn{2}{l}{\where \registers' = \registers \exc \registers'_7 = \mathtt{WHAT}} \\
+      \multicolumn{2}{l}{\also \gascounter' = \gascounter - \Cgasunknown}
+    \end{cases}
+\end{align}
+
+注意，对于公式 \ref{eq:isauthorizedmutator} 中的授权检查宿主调用分派函数 $F$，我们省略了宿主调用上下文，因为它本质上是无状态的，始终为 $\none$。
+
+\subsection{Refine 调用 (Refine Invocation)}\label{sec:refineinvocation}
+
+我们将 Refine 服务账户调用函数定义为 $\Psi_R$。它没有对 \Jam 链状态的一般访问权限，唯一的例外是能够进行历史查询。除此之外，它能够创建 \textsc{pvm} 的内部实例并指定要导出的数据片段。
+
+历史查询宿主调用函数 $\Omega_H$ 的设计使得无论链的状态如何，在任何可能的审计时间（我们限定为累积后不超过两个 epoch）内都能得到相同的结果。查询锚点可以早于最近历史 $\Cmaxlookupanchorage$ 个时间槽，因此增加了审计时的潜在时间跨度。因此，我们将 $\Cexpungeperiod$ 设置为具有八小时的安全裕量：
+\begin{equation}
+  \Cexpungeperiod \equiv \Cmaxlookupanchorage + 4,800 = 19,200
+\end{equation}
+
+
+内部 \textsc{pvm} 调用宿主调用同时依赖于一个集成的 \textsc{pvm} 类型，我们将其记为 $\innerpvm$。它持有一个 \textsc{pvm} 程序 blob、指令计数器、\textsc{ram} 以及一个标志，用于表示当前执行的基本块是否已被收取 gas：
+\begin{equation}\label{eq:innerpvm}
+  \innerpvm \equiv \tuple{\isa{\pg¬code}{\blob}, \isa{\pg¬ram}{\ram}, \isa{\pg¬pc}{\pvmreg}, \isa{\pg¬gaschargedflag}{\bool}}
+\end{equation}
+
+Export 宿主调用依赖于两部分上下文；一个可以追加的段序列（长度为 $\Csegmentsize$ 的 blob），以及一个传递给调用函数的参数，用于指定可以假定已追加的先前段的数量。后一个值确保可以向调用者提供准确的段索引。
+
+与其他调用函数不同，Refine 调用函数隐式地依赖于某些最近的服务账户状态项 $\accounts$。它来自哪个具体区块并不重要，只要不早于其工作包的查找锚区块即可。它显式接受工作包 $p$ 和待 refine 的工作项索引 $i$，以及执行 refine 的核心 $c$。此外，还提供了授权追踪 $\mathbf{r}$、所有工作项的导入段 $\overline{\mathbf{i}}$ 和导出段偏移 $\segoff$。它的结果是一个包含错误 $\workerror$ 或 refine 输出 blob（表示成功）的元组、成功时的导出序列以及评估所用的 gas。形式上：
+\begin{align}
+  &\Psi_R \colon \abracegroup{
+    \label{eq:refinvocation}
+    \tuple{\coreindex, \N, \workpackage, \blob, \sequence{\sequence{\segment}}, \N} &\to \tuple{\blob \cup \workerror, \sequence{\segment}, \gas} \\
+    \tup{c, i, p, \mathbf{r}, \overline{\mathbf{i}}, \segoff} &\mapsto \begin{cases}
+      \tup{\token{BAD}, \sq{}, 0} &\when w_\wi¬serviceindex \not\in \keys{\accounts} \vee \histlookup(\accounts\subb{w_\wi¬serviceindex}, (p_\wp¬context)_\wc¬lookupanchortime, w_\wi¬codehash) = \none \\
+      \tup{\token{BIG}, \sq{}, 0} &\otherwhen \len{\histlookup(\accounts\subb{w_\wi¬serviceindex}, (p_\wp¬context)_\wc¬lookupanchortime, w_\wi¬codehash)} > \Cmaxservicecodesize \\
+      &\otherwise: \\
+      &\quad\using \mathbf{a} = \encode{c, i, w_\wi¬serviceindex, \var{w_\wi¬payload}, \blake{p}}\;,\ \encode{\var{\mathbf{z}}, \jam¬blob} = \histlookup(\accounts\subb{w_\wi¬serviceindex}, (p_\wp¬context)_\wc¬lookupanchortime, w_\wi¬codehash)\\
+      &\quad\also \tup{u, \mathbf{o}, \tup{\mathbf{m}, \mathbf{e}}} = \Psi_M(\jam¬blob, 0, w_\wi¬refgaslimit, \mathbf{a}, F, \tup{\emptyset, \sq{}})\ \colon\\
+      \tup{\mathbf{o}, \sq{}, u} &\quad\when \mathbf{o} \in \set{ \oog, \panic }  \\
+      \tup{\mathbf{o}, \mathbf{e}, u} &\quad\otherwise \\
+      \multicolumn{2}{l}{\where w = p_\wp¬workitems\subb{i}}
+    \end{cases} \\
+  } \\
+  \label{eq:refinemutator}
+  &F \in \contextmutator{\tuple{\dictionary{\N}{\innerpvm}, \sequence{\segment}}} \colon
+    (n, \gascounter, \registers, \memory, \tup{\mathbf{m}, \mathbf{e}}) \mapsto \begin{cases}
+      \Omega_G(\gascounter, \registers, \memory, \tup{\mathbf{m}, \mathbf{e}}) &\when n = \mathtt{gas} \\
+      \Omega_\Gemini(\gascounter, \registers, \memory, \jam¬blob) &\when n = \mathtt{grow\_heap} \\
+      \Omega_Y(\gascounter, \registers, \memory, p, \zerohash, \mathbf{r}, i, \overline{\mathbf{i}}, \overline{\mathbf{x}}, \none, \tup{\mathbf{m}, \mathbf{e}}) &\when n = \mathtt{fetch}\\
+      \Omega_H(\gascounter, \registers, \memory, w_\wi¬serviceindex, \accounts, (p_\wp¬context)_\wc¬lookupanchortime) &\when n = \mathtt{historical\_lookup}\\
+      \Omega_E(\gascounter, \registers, \memory, \mathbf{e}, \segoff) &\when n = \mathtt{export}\\
+      \Omega_M(\gascounter, \registers, \memory, \mathbf{m}) &\when n = \mathtt{machine}\\
+      \Omega_P(\gascounter, \registers, \memory, \mathbf{m}) &\when n = \mathtt{peek}\\
+      \Omega_O(\gascounter, \registers, \memory, \mathbf{m}) &\when n = \mathtt{poke}\\
+      \Omega_Z(\gascounter, \registers, \memory, \mathbf{m}) &\when n = \mathtt{pages}\\
+      \Omega_K(\gascounter, \registers, \memory, \mathbf{m}) &\when n = \mathtt{invoke}\\
+      \Omega_X(\gascounter, \registers, \memory, \mathbf{m}) &\when n = \mathtt{expunge}\\
+      \tup{\oog, \gascounter', \registers', \memory} &\otherwhen \gascounter' < 0\\
+      \tup{\continue, \gascounter', \registers', \memory} &\otherwise\\
+      \multicolumn{2}{l}{\where \registers' = \registers \exc \registers'_7 = \mathtt{WHAT}} \\
+      \multicolumn{2}{l}{\also \gascounter' = \gascounter - \Cgasunknown} \\
+      \multicolumn{2}{l}{\also \overline{\mathbf{x}} = \sq{\build{
+        \sq{\build{
+          \mathbf{x}
+        }{
+          \tup{\blake{\mathbf{x}}, \len{\mathbf{x}}} \orderedin \wiX_\wi¬extrinsics
+        }}
+      }{
+        \wiX \orderedin p_\wp¬workitems
+      }}}
+    \end{cases}
+\end{align}
+
+\subsection{累积调用 (Accumulate Invocation)}\label{sec:accumulateinvocation}
+
+由于这是一个可以直接影响大量链上状态的转换，我们的调用上下文相应地较为复杂。它是一个元组，包含可以通过此调用改变的每个状态方面的元素，除了服务自身的账户外，还包括延迟转账列表以及用于预镜像查找状态、核心分配、验证者密钥分配、新创建账户和账户权限级别更改的多个字典。
+
+形式上，我们将结果上下文定义为 $\implications$，调用上下文定义为这些上下文的对 $\implications \times \implications$（因此对于任何值 $\imX \in \implications$ 存在 $\imX^2 \in \implications \times \implications$），一个维度是常规维度，通常命名为 $\imX$，另一个维度是异常维度，命名为 $\imY$。唯一实际改变第二维度的函数是 $\mathtt{checkpoint}$，$\Omega_C$，因此它很少出现。
+\begin{align}\label{eq:implications}
+  \implications &\equiv \tuple{
+    \isa{\im¬id}{\serviceid},
+    \isa{\im¬state}{\partialstate},
+    \isa{\im¬nextfreeid}{\serviceid},
+    \isa{\im¬xfers}{\defxfers},
+    \isa{\im¬yield}{\optional{\hash}},
+    \isa{\im¬provisions}{\protoset{\tuple{\serviceid, \blob}}}
+  }\\
+  \forall \imX \in \implications :
+    \imX_\im¬self &\equiv (\imX_\im¬state)_\ps¬accounts\subb{\imX_\im¬id}
+\end{align}
+
+我们定义了一个便捷等价关系 $\imX_\im¬self$ 以方便表示正在累积的服务账户。
+
+我们在上下文修改器中跟踪常规和异常两个维度，但根据终止是常规的还是异常的（\ie gas 耗尽或 panic），将调用结果折叠到其中一个维度。
+
+我们将 $\Psi_A$（累积调用函数）定义为：
+\newcommand*{\local¬basestate}{\ao¬poststate}
+\newcommand*{\local¬postxferstate}{\mathbf{s}}
+\begin{align}
+  \label{eq:accinvocation}
+  \Psi_A& \colon\abracegroup{
+    \tuple{
+      \partialstate, \timeslot, \serviceid, \gas, \sequence{\operandtuple \cup \defxfer}
+    }
+    &\to \acconeout
+    \\
+    \tup{\local¬basestate, t, s, g, \mathbf{i}} &\mapsto \begin{cases}
+      \tup{
+        \is{\ao¬poststate}{\local¬postxferstate},
+        \is{\ao¬defxfers}{\sq{}},
+        \is{\ao¬yield}{\none},
+        \is{\ao¬gasused}{0},
+        \is{\ao¬provisions}{\sq{}}
+      }
+        &\when \jam¬blob = \none \vee \len{\jam¬blob} > \Cmaxservicecodesize \\
+      C(\Psi_M(\jam¬blob, 5, g, \encode{t, s, \len{\mathbf{i}}}, F, I(\local¬postxferstate, s)^2))
+        &\otherwise \\
+      \begin{aligned}
+        &\quad\where \jam¬blob = \local¬basestate_\ps¬accounts\subb{s}_\sa¬code\\
+        &\quad\also \local¬postxferstate = \local¬basestate \exc \local¬postxferstate_\ps¬accounts\subb{s}_\sa¬balance = \local¬basestate_\ps¬accounts\subb{s}_\sa¬balance + \sum_{r \in \mathbf{x}}r_\dx¬amount\\
+        &\quad\also \mathbf{x} = \sq{\build{i}{
+          i \orderedin \mathbf{i} ,
+          i \in \defxfer
+        }}
+      \end{aligned}\\
+    \end{cases} \\
+  }\\
+  I&\colon\abracegroup{
+    \tuple{\partialstate, \serviceid} &\to \implications\\
+    \tup{\im¬state, \im¬id} &\mapsto \tup{
+      \im¬id,
+      \im¬state,
+      \im¬nextfreeid,
+      \is{\im¬xfers}{\sq{}},
+      \is{\im¬yield}{\none},
+      \is{\im¬provisions}{\sq{}}
+    }\\
+    &\qquad\where \im¬nextfreeid = \text{check}((\decode[4]{\blake{\encode{\im¬id, \entropyaccumulator', \H_\¬timeslot}}} \bmod (2^{32}-\Cminpublicindex-2^8)) + \Cminpublicindex) \\
+  }\\
+  F \in \contextmutator{\implicationspair} &\colon \tup{n, \gascounter, \registers, \memory, \imXY} \mapsto \begin{cases}
+  \Omega_G(\gascounter, \registers, \memory, \imXY) &\when n = \mathtt{gas} \\
+    \Omega_\Gemini(\gascounter, \registers, \memory, \jam¬blob) &\when n = \mathtt{grow\_heap} \\
+    \Omega_Y(\gascounter, \registers, \memory, \none, \entropyaccumulator', \none, \none, \none, \none, \mathbf{i}, \imXY) &\when n = \mathtt{fetch}\\
+    G(\Omega_R(\gascounter, \registers, \memory, \imX_\im¬self, \imX_\im¬id, (\imX_\im¬state)_\ps¬accounts), \imXY) &\when n = \mathtt{read} \\
+    G(\Omega_W(\gascounter, \registers, \memory, \imX_\im¬self, \imX_\im¬id), \imXY) &\when n = \mathtt{write} \\
+    G(\Omega_L(\gascounter, \registers, \memory, \imX_\im¬self, \imX_\im¬id, (\imX_\im¬state)_\ps¬accounts), \imXY) &\when n = \mathtt{lookup} \\
+    G(\Omega_I(\gascounter, \registers, \memory, \imX_\im¬id, (\imX_\im¬state)_\ps¬accounts), \imXY) &\when n = \mathtt{info} \\
+    \Omega_B(\gascounter, \registers, \memory, \imXY) &\when n = \mathtt{bless}\\
+    \Omega_A(\gascounter, \registers, \memory, \imXY) &\when n = \mathtt{assign}\\
+    \Omega_D(\gascounter, \registers, \memory, \imXY) &\when n = \mathtt{designate}\\
+    \Omega_C(\gascounter, \registers, \memory, \imXY) &\when n = \mathtt{checkpoint} \\
+    \Omega_N(\gascounter, \registers, \memory, \imXY, \H_\¬timeslot) &\when n = \mathtt{new} \\
+    \Omega_U(\gascounter, \registers, \memory, \imXY) &\when n = \mathtt{upgrade} \\
+    \Omega_T(\gascounter, \registers, \memory, \imXY) &\when n = \mathtt{transfer} \\
+    \Omega_J(\gascounter, \registers, \memory, \imXY, \H_\¬timeslot) &\when n = \mathtt{eject} \\
+    \Omega_Q(\gascounter, \registers, \memory, \imXY) &\when n = \mathtt{query} \\
+    \Omega_S(\gascounter, \registers, \memory, \imXY, \H_\¬timeslot) &\when n = \mathtt{solicit} \\
+    \Omega_F(\gascounter, \registers, \memory, \imXY, \H_\¬timeslot) &\when n = \mathtt{forget} \\
+    \Omega_\Taurus(\gascounter, \registers, \memory, \imXY) &\when n = \mathtt{yield} \\
+    \Omega_\Aries(\gascounter, \registers, \memory, \imXY) &\when n = \mathtt{provide} \\
+    \tup{\oog, \gascounter', \registers', \memory, \imXY} &\otherwhen \gascounter' < 0\\
+    \tup{\continue, \gascounter', \registers', \memory, \imXY} &\otherwise\\
+    \multicolumn{2}{l}{\where \registers' = \registers \exc \registers'_7 = \mathtt{WHAT}} \\
+    \multicolumn{2}{l}{\also \gascounter' = \gascounter - \Cgasunknown}
+  \end{cases} \\
+  G&\colon\abracegroup{
+    \tuple{\tuple{\set{\continue, \halt, \panic, \oog}, \gas, \regs, \ram, \serviceaccount}, \implicationspair} &\to \tuple{\set{\continue, \halt, \panic, \oog}, \gas, \regs, \ram, \implicationspair} \\
+    \tup{\tup{\execst, \gascounter, \registers, \memory, \mathbf{s}}, \imXY} &\mapsto \tup{\execst, \gascounter, \registers, \memory, \tup{\imX^*, \imY}} \\
+    &\qquad \where \imX^* = \imX \exc \imX^*_\im¬self = \mathbf{s}
+  }\\
+  C&\colon\abracegroup{
+    \tuple{\gas, \blob \cup \set{\oog, \panic}, \implicationspair} &\to \acconeout \\
+    \tup{\ao¬gasused, \mathbf{o}, \imXY} &\mapsto \begin{cases}
+      \tup{
+        \is{\ao¬poststate}{\imY_\im¬state},
+        \is{\ao¬defxfers}{\imY_\im¬xfers},
+        \is{\ao¬yield}{\imY_\im¬yield},
+        \ao¬gasused,
+        \is{\ao¬provisions}{\imY_\im¬provisions}
+      } & \when \mathbf{o} \in \set{\oog, \panic} \\
+      \tup{
+        \is{\ao¬poststate}{\imX_\im¬state},
+        \is{\ao¬defxfers}{\imX_\im¬xfers},
+        \is{\ao¬yield}{\mathbf{o}},
+        \ao¬gasused,
+        \is{\ao¬provisions}{\imXY_\im¬provisions}
+      } & \otherwhen \mathbf{o} \in \hash \\
+      \tup{
+        \is{\ao¬poststate}{\imX_\im¬state},
+        \is{\ao¬defxfers}{\imX_\im¬xfers},
+        \is{\ao¬yield}{\imX_\im¬yield},
+        \ao¬gasused,
+        \is{\ao¬provisions}{\imX_\im¬provisions}
+      } & \otherwise \\
+    \end{cases}
+  }
+\end{align}
+
+修改器 $F$ 控制在任何给定参数化下上下文将如何变化，而折叠函数 $C$ 根据虚拟机的停止是常规的还是异常的，选择上下文的两个维度之一。
+
+初始化函数 $I$ 将部分状态与服务账户索引映射为修改器上下文，使得在两种退出场景中都不暗示对给定状态的更改。注意，组件 $a$ 利用随机累积器 $\entropyaccumulator'$ 和区块的时间槽 $\H_\¬timeslot$ 创建一个极大概率唯一的确定性标识符序列。
+
+具体来说，我们从创建服务的标识符、当前随机累积器 $\entropyaccumulator'$ 和区块的时间槽的 Blake2 哈希创建标识符。因此，在一个服务的累积中它几乎肯定是唯一的，但不一定在所有服务中唯一，也不一定在所有过去时间唯一。我们利用一个 \emph{check} 函数来找到此序列中第一个尚未表示服务的索引：
+\begin{equation}
+  \label{eq:newserviceindex}
+  \text{check}(i \in \serviceid) \equiv \begin{cases}
+    i &\when i \not\in \keys{\local¬basestate_\ps¬accounts} \\
+    \text{check}((i - \Cminpublicindex + 1) \bmod (2^{32}-2^8-\Cminpublicindex) + \Cminpublicindex)&\otherwise
+  \end{cases}
+\end{equation}
+
+\nb 在极不可能的情况下，如果一个区块执行时发现单个服务索引被意外地附加到两个不同的服务，则该区块被视为无效。由于没有服务能够提前预测标识符序列，它们无法故意使区块作者处于不利地位。
+
+\undef{\local¬basestate}
+
+
+
+
+
+\subsection{通用函数 (General Functions)}\label{sec:generalfunctions}
+
+我们现在开始定义 \textsc{pvm} 调用所使用的宿主函数。一般来说，这些函数将某些 \textsc{pvm} 状态（包括调用上下文）可能与一些附加参数一起映射到新的 \textsc{pvm} 状态。
+
+通用函数大致都具有以下形式 $\tup{\gascounter' \in \signedgas, \registers' \in \regs, \memory' \in \ram} = \Omega_\square(\gascounter \in \gas, \registers \in \regs, \memory \in \ram)$。结果分量与相应参数等价的函数可以在描述中省略这些分量。函数也可能依赖于特定的附加参数。
+
+与附录 \ref{sec:accumulatefunctions} 中的累积函数不同，这些函数不会改变累积上下文。某些函数（如 $\mathtt{write}$）会修改服务账户，既接受也返回某个 $\mathbf{s} \in \serviceaccount$。其他函数更通用，如 $\mathtt{fetch}$，不假定任何上下文，但其参数列表后缀有省略号，表示上下文参数可以被获取并透明地传递到其结果中。这使得它可以轻松用于多个 \textsc{pvm} 调用。
+
+除非另有明确说明，\textsc{pvm} 状态的各元素均假定在宿主调用后保持不变。
+\begin{align}
+  \gascounter' &\equiv \gascounter - g\text{ 除非 $\gascounter'$ 在下面被明确定义}\\
+  \tup{\execst', \registers', \memory', \mathbf{s}'} &\equiv \begin{cases}
+    \tup{\oog, \registers, \memory, \mathbf{s}} &\when \gascounter < g\\
+    \tup{\continue, \registers, \memory, \mathbf{s}} \text{ 如下所述的例外情况} &\otherwise
+  \end{cases}
+\end{align}
+
+宿主调用的内存大小 gas 由速率 $L$（每 1024 字节的 gas）和大小 $\ell$（字节）给出。以下定义了此大小的 gas 成本：
+\begin{equation}\label{eq:fnmemgas}
+  \fnmemgas(L, \ell) \equiv \ceil{\frac{L \cdot \ell}{1024}}
+\end{equation}
+基本成本为 $c$，总 gas 为 $c + \fnmemgas(L, \ell)$。下面的宿主调用表对所有内存大小项使用此公式。
+
+\aboverulesep = 1.5mm \belowrulesep = 2mm
+
+\begin{longtable}{p{5cm} p{11cm}}
+  \toprule
+  \thead*{\textbf{函数} \\ \textbf{标识符} \\ \textbf{Gas 用量 (}$g$\textbf{)}} &
+  \thead{\textbf{变更}} \\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \endhead
+  \makecell*[l]{
+  $\Omega_G(\gascounter, \registers, \dots)$ \\
+  \texttt{gas} = 0 \\
+  $g = \CgasG$} &
+  $\begin{aligned}
+    \registers'_7 &\equiv \gascounter'
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_\Gemini(\gascounter, \registers, \memory, \jam¬blob)$ \\
+  \texttt{grow\_heap} = 1 \\
+  $g = \CgasGeminiconst + (\registers_7 - h) \cdot \CgasGeminilinear$} &
+  $\begin{aligned}
+    % This hostcall can be used to expand the RW data region of memory, or to query its size.
+    %
+    % It takes a single argument: the index of last writable page (plus one) the user would like
+    % to be able to access within the RW data region of the address space.
+    %
+    % It returns the index (plus one) of the last writable page in the RW data region, regardless
+    % of whether anything has changed.
+    %
+    % Extract the RO data size and the stack size from the JAM program blob.
+    \using (\mathbf{o}, s) &\mapsto \jam¬blob \text{ 根据公式 \ref{eq:conditions}} \\
+    % Page index of the start of the RW data region.
+    \using a &= \frac{2\Cpvminitzonesize + \rnq{\len{\mathbf{o}}}}{\Cpvmpagesize} \\
+    % Page index plus one of the last possible RW data region page.
+    \using b &= \frac{2^{32} - 3\Cpvminitzonesize - \Cpvminitinputsize - \rnp{s}}{\Cpvmpagesize} \\
+    % Current writable page count of the RW data region.
+    \using c &= |\set{\build{p \in \Nclamp{a}{b}}{\memory_\ram¬access\subb{p} = \mathrm{W}}}| \\
+    % Current heap pointer.
+    \using h &= a + c \\
+    \tup{\execst', \gascounter', \registers'_7} &\equiv \begin{cases}
+      % Do nothing if the heap is large enough already, or if the requested size was too large.
+      \tup{\continue, \gascounter - \CgasGeminiconst, h} &\when \registers_7 \leq h \lor \registers_7 > b \\
+      % Only enlarge the heap if we have enough gas; otherwise abort with OOG.
+      \tup{\oog, \gascounter, h} &\otherwhen \gascounter < g \\
+      % Charge gas and expand the accessible RW data region.
+      \tup{\continue, \gascounter - g, \registers_7} &\otherwise \\
+    \end{cases}\\
+    (\memory'_\ram¬access)\interval{a}{\registers_7'} &\equiv \sq{\mathrm{W}, \dots, \mathrm{W}}
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_Y(\gascounter, \registers, \memory, p, n, \mathbf{r}, i, \overline{\mathbf{i}}, \overline{\mathbf{x}}, \mathbf{i}, \dots)$ \\
+  \texttt{fetch} = 2 \\
+  $g = \CgasYc{c} + \fnmemgas(\CgasYl{c}, z)$} &
+  $\begin{aligned}
+    \using c &= \begin{cases}
+      \registers_{10} &\when \registers_{10} < 16 \\
+      \none &\otherwise
+    \end{cases} \\
+    \using \mathbf{v} &= \begin{cases}
+      \mathbf{c} &\when \registers_{10} = 0 \\
+      \multicolumn{2}{l}{\where \mathbf{c} = \encode{
+        \begin{aligned}
+          &\encode[8]{\Citemdeposit},
+          \encode[8]{\Cbytedeposit},
+          \encode[8]{\Cbasedeposit},
+          \encode[2]{\Ccorecount},
+          \encode[4]{\Cexpungeperiod},
+          \encode[4]{\Cepochlen},
+          \encode[8]{\Creportaccgas},\\
+          &\encode[8]{\Cpackageauthgas},
+          \encode[8]{\Cpackagerefgas},
+          \encode[8]{\Cblockaccgas},
+          \encode[2]{\Crecenthistorylen},
+          \encode[2]{\Cmaxpackageitems},
+          \encode[2]{\Cmaxreportdeps},
+          \encode[2]{\Cmaxblocktickets},\\
+          &\encode[4]{\Cmaxlookupanchorage},
+          \encode[2]{\Cauthpoolsize},
+          \encode[2]{\Cslotseconds},
+          \encode[2]{\Cauthqueuesize},
+          \encode[2]{\Crotationperiod},
+          \encode[2]{\Cmaxpackagexts},
+          \encode[2]{\Cassurancetimeoutperiod},\\
+          &\encode[4]{\Cmaxauthcodesize},
+          \encode[4]{\Cmaxbundlesize},
+          \encode[4]{\Cmaxservicecodesize},
+          \encode[4]{\Cmaxpackageimports},
+          \encode[4]{\Cmaxreportvarsize},\\
+          &\encode[4]{\Cmemosize},
+          \encode[4]{\Cmaxpackageexports},
+          \encode[4]{\Cepochtailstart}
+        \end{aligned}
+      }}\\
+      n &\when n \ne \none \wedge \registers_{10} = 1 \\
+      \mathbf{r} &\when \mathbf{r} \ne \none \wedge \registers_{10} = 2 \\
+      \overline{\mathbf{x}}[\registers_{11}]_{\registers_{12}} &\when \overline{\mathbf{x}} \ne \none \wedge \registers_{10} = 3 \wedge \registers_{11} < \len{\overline{\mathbf{x}}} \wedge \registers_{12} < \len{\overline{\mathbf{x}}[\registers_{11}]} \\
+      \overline{\mathbf{x}}\subb{i}_{\registers_{11}} &\when \overline{\mathbf{x}} \ne \none \wedge i \ne \none \wedge \registers_{10} = 4 \wedge \registers_{11} < \len{\overline{\mathbf{x}}\subb{i}} \\
+      \overline{\mathbf{i}}[\registers_{11}]_{\registers_{12}} &\when \overline{\mathbf{i}} \ne \none \wedge \registers_{10} = 5 \wedge \registers_{11} < \len{\overline{\mathbf{i}}} \wedge \registers_{12} < \len{\overline{\mathbf{i}}[\registers_{11}]} \\
+      \overline{\mathbf{i}}\subb{i}_{\registers_{11}} &\when \overline{\mathbf{i}} \ne \none \wedge i \ne \none \wedge \registers_{10} = 6 \wedge \registers_{11} < \len{\overline{\mathbf{i}}\subb{i}} \\
+      \encode{p} &\when p \ne \none \wedge \registers_{10} = 7 \\
+      p_\wp¬authconfig &\when p \ne \none \wedge \registers_{10} = 8 \\
+      p_\wp¬authtoken &\when p \ne \none \wedge \registers_{10} = 9 \\
+      \encode{p_\wp¬context} &\when p \ne \none \wedge \registers_{10} = 10 \\
+      \encode{\var{\sq{\build{S(w)}{w \orderedin p_\wp¬workitems}}}} &\when p \ne \none \wedge \registers_{10} = 11 \\
+      S(p_\wp¬workitems[\registers_{11}]) &\when p \ne \none \wedge \registers_{10} = 12 \wedge \registers_{11} < \len{p_\wp¬workitems} \\
+      \multicolumn{2}{l}{\where S(w) \equiv \encode{\encode[4]{w_\wi¬serviceindex}, w_\wi¬codehash, \encode[8]{w_\wi¬refgaslimit, w_\wi¬accgaslimit}, \encode[2]{w_\wi¬exportcount, \len{w_\wi¬importsegments}, \len{w_\wi¬extrinsics}}, \encode[4]{\len{w_\wi¬payload}}}} \\
+      p_\wp¬workitems[\registers_{11}]_\wi¬payload &\when p \ne \none \wedge \registers_{10} = 13 \wedge \registers_{11} < \len{p_\wp¬workitems} \\
+      \encode{\var{\mathbf{i}}} &\when \mathbf{i} \ne \none \wedge \registers_{10} = 14 \\
+      \encode{\mathbf{i}[\registers_{11}]} &\when \mathbf{i} \ne \none \wedge \registers_{10} = 15 \wedge \registers_{11} < \len{\mathbf{i}} \\
+      \none &\otherwise
+    \end{cases} \\
+    \using \sq{o, f_0, z} &= \registers\subrange{7}{3} \\
+    \using f &= \min(f_0, \len{\mathbf{v}}) \\
+    \using l &= \min(z, \len{\mathbf{v}} - f) \\
+    \tup{\execst', \registers'_7, \memory'\subrange{o}{l}} &\equiv \begin{cases}
+      \tup{\panic, \registers_7, \memory\subrange{o}{l}} &\when \Nrange{o}{l} \not\subseteq \writable{\memory} \\
+      \tup{\continue, \mathtt{NONE}, \memory\subrange{o}{l}} &\otherwhen \mathbf{v} = \none \\
+      \tup{\continue, \len{\mathbf{v}}, \mathbf{v}\subrange{f}{l}} &\otherwise \\
+    \end{cases}
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_L(\gascounter, \registers, \memory, \mathbf{s}, s, \mathbf{d})$ \\
+  \texttt{lookup} = 3 \\
+  $g = \CgasLconst + \fnmemgas(\CgasLlinear, z) $} &
+  $\begin{aligned}
+    \using \mathbf{a} &= \begin{cases}
+      \mathbf{s} &\when \registers_7 \in \set{ s, 2^{64} - 1 } \\
+      \mathbf{d}[\registers_7] &\otherwhen \registers_7 \in \keys{\mathbf{d}} \\
+      \none &\otherwise
+    \end{cases} \\
+    \using \sq{h, o} &= \registers\subrange{8}{2} \\
+    \using z &= \registers_{11} \\
+    \using \mathbf{v} &= \begin{cases}
+      \error &\when \Nrange{h}{32} \not\subseteq \readable{\memory} \\
+      \none &\otherwhen \mathbf{a} = \none \vee \memory\subrange{h}{32} \not\in \keys{\mathbf{a}_\sa¬preimages} \\
+      \mathbf{a}_\sa¬preimages[\memory\subrange{h}{32}] &\otherwise \\
+    \end{cases} \\
+    \using f &= \min(\registers_{10}, \len{\mathbf{v}}) \\
+    \using l &= \min(z, \len{\mathbf{v}} - f) \\
+    \tup{\execst', \registers'_7, \memory'\subrange{o}{l}} &\equiv \begin{cases}
+      \tup{\panic, \registers_7, \memory\subrange{o}{l}} &\when \mathbf{v} = \error \vee \Nrange{o}{l} \not\subseteq \writable{\memory}\\
+      \tup{\continue, \mathtt{NONE}, \memory\subrange{o}{l}} &\otherwhen \mathbf{v} = \none \\
+      \tup{\continue, \len{\mathbf{v}}, \mathbf{v}\subrange{f}{l}} &\otherwise \\
+    \end{cases}
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_R(\gascounter, \registers, \memory, \mathbf{s}, s, \mathbf{d})$ \\
+  \texttt{read} = 4 \\
+  $g = \CgasRconst + \fnmemgas(\CgasRkeylinear, k_Z) + \fnmemgas(\CgasRvallinear, v_Z) $} &
+  $\begin{aligned}
+    \using s^* &= \begin{cases}
+      s &\when \registers_7 = 2^{64} - 1 \\
+      \registers_7 &\otherwise
+    \end{cases} \\
+    \using \mathbf{a} &= \begin{cases}
+      \mathbf{s} &\when s^* = s \\
+      \mathbf{d}[s^*] &\otherwhen s^* \in \keys{\mathbf{d}} \\
+      \none &\otherwise
+    \end{cases} \\
+    \using \sq{k_O, k_Z, o} &= \registers\subrange{8}{3} \\
+    \using v_Z &= \registers_{12} \\
+    \using \mathbf{v} &= \begin{cases}
+      \error &\when \Nrange{k_O}{k_Z} \not\subseteq \readable{\memory} \\
+      \mathbf{a}_\sa¬storage\subb{\mathbf{k}} &\otherwhen \mathbf{a} \ne \none \wedge \mathbf{k} \in \keys{\mathbf{a}_\sa¬storage}\,,\ \where \mathbf{k} = \memory\subrange{k_O}{k_Z} \\
+      \none &\otherwise
+    \end{cases} \\
+    \using f &= \min(\registers_{11}, \len{\mathbf{v}}) \\
+    \using l &= \min(v_Z, \len{\mathbf{v}} - f) \\
+    \tup{\execst', \registers'_7, \memory'\subrange{o}{l}} &\equiv \begin{cases}
+      \tup{\panic, \registers_7, \memory\subrange{o}{l}} &\when \mathbf{v} = \error \vee \Nrange{o}{l} \not\subseteq \writable{\memory}\\
+      \tup{\continue, \mathtt{NONE}, \memory\subrange{o}{l}} &\otherwhen \mathbf{v} = \none \\
+      \tup{\continue, \len{\mathbf{v}}, \mathbf{v}\subrange{f}{l}} &\otherwise \\
+    \end{cases}
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_W(\gascounter, \registers, \memory, \mathbf{s}, s)$ \\
+  \texttt{write} = 5 \\
+  $g = \CgasWconst + \fnmemgas(\CgasWkeylinear, k_Z) + \fnmemgas(\CgasWvallinear, v_Z)$} &
+  $\begin{aligned}
+    \using \sq{k_O, k_Z, v_O, v_Z} &= \registers\subrange{7}{4} \\
+    \using \mathbf{k} &= \begin{cases}
+      \memory\subrange{k_O}{k_Z} &\when \Nrange{k_O}{k_Z} \subseteq \readable{\memory} \\
+      \error &\otherwise
+    \end{cases} \\
+    \using \mathbf{a} &= \begin{cases}
+      \mathbf{s}\,,\ \exc \keys{\mathbf{a}_\sa¬storage} = \keys{\mathbf{a}_\sa¬storage} \setminus \set{k} & \when v_Z = 0 \\
+      \mathbf{s}\,,\ \exc \mathbf{a}_\sa¬storage\subb{\mathbf{k}} = \memory\subrange{v_O}{v_Z} &\otherwhen \Nrange{v_O}{v_Z} \subseteq \readable{\memory} \\
+      \error &\otherwise
+    \end{cases} \\
+    \using l &= \begin{cases}
+      \len{\mathbf{s}_\sa¬storage\subb{k}} &\when \mathbf{k} \in \keys{\mathbf{s}_\sa¬storage} \\
+      \mathtt{NONE} &\otherwise
+    \end{cases} \\
+    \tup{\execst', \registers'_7, \mathbf{s}'} &\equiv \begin{cases}
+      \tup{\panic, \registers_7, \mathbf{s}} &\when \mathbf{k} = \error \vee \mathbf{a} = \error\\
+      \tup{\continue, \mathtt{FULL}, \mathbf{s}} &\otherwhen \mathbf{a}_\sa¬minbalance > \mathbf{a}_\sa¬balance \\
+      \tup{\continue, l, \mathbf{a}} &\otherwise\\
+    \end{cases}
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_I(\gascounter, \registers, \memory, s, \mathbf{d})$ \\
+  \texttt{info} = 6 \\
+  $g = \CgasI$} &
+  $\begin{aligned}
+    \using \mathbf{a} &= \begin{cases}
+      \mathbf{d}\subb{s} &\when \registers_7 = 2^{64} - 1 \\
+      \mathbf{d}\subb{\registers_7} &\otherwise
+    \end{cases} \\
+    \using o &= \registers_8 \\
+    \using \mathbf{v} &= \begin{cases}
+      \encode{
+        \mathbf{a}_\sa¬codehash,
+        \encode[8]{\mathbf{a}_\sa¬balance, \mathbf{a}_\sa¬minbalance, \mathbf{a}_\sa¬minaccgas, \mathbf{a}_\sa¬minmemogas, \mathbf{a}_\sa¬octets},
+        \encode[4]{\mathbf{a}_\sa¬items},
+        \encode[8]{\mathbf{a}_\sa¬gratis},
+        \encode[4]{\mathbf{a}_\sa¬created, \mathbf{a}_\sa¬lastacc, \mathbf{a}_\sa¬parent}
+      } &\when \mathbf{a} \ne \none \\
+      \none &\otherwise
+    \end{cases} \\
+    \using f &= \min(\registers_{9}, \len{\mathbf{v}}) \\
+    \using l &= \min(\registers_{10}, \len{\mathbf{v}} - f) \\
+    \tup{\execst', \registers'_7, \memory'\subrange{o}{l}} &\equiv \begin{cases}
+      \tup{\panic, \registers_7, \memory\subrange{o}{l}} &\when \mathbf{v} = \error \vee \Nrange{o}{l} \not\subseteq \writable{\memory}\\
+      \tup{\continue, \mathtt{NONE}, \memory\subrange{o}{l}} &\otherwhen \mathbf{v} = \none \\
+      \tup{\continue, \len{\mathbf{v}}, \mathbf{v}\subrange{f}{l}} &\otherwise \\
+    \end{cases}
+  \end{aligned}$ \\
+  \bottomrule
+\end{longtable}
+
+\subsection{Refine 函数 (Refine Functions)}\label{sec:refinefunctions}
+
+这些函数假定存在某个 refine 上下文对 $\tup{\mathbf{m}, \mathbf{e}} \in \tuple{\dictionary{\N}{\innerpvm}, \sequence{\segment}}$，两者最初均为空。除了明确规定的 gas 计数器外，\textsc{pvm} 状态的各元素均假定在宿主调用后保持不变，除非另有明确说明。
+\begin{align}
+  \gascounter' &\equiv \gascounter - g\\
+  \tup{\execst', \registers', \memory'} &\equiv \begin{cases}
+    \tup{\oog, \registers, \memory} &\when \gascounter < g\\
+    \tup{\continue, \registers, \memory} \text{ 如下所述的例外情况} &\otherwise
+  \end{cases}
+\end{align}
+
+\begin{longtable}{p{5cm} p{11cm}}
+  \toprule
+  \thead*{\textbf{函数} \\ \textbf{标识符} \\ \textbf{Gas 用量 (}$g$\textbf{)}} &
+  \thead{\textbf{变更}} \\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \endhead
+  \makecell*[l]{
+  $\Omega_H(\gascounter, \registers, \memory, s, \mathbf{d}, t)$ \\
+  \texttt{historical\_lookup} = 7 \\
+  $g = \CgasHconst + \fnmemgas(\CgasHlinear, z)$} &
+  $\begin{aligned}
+    \using \mathbf{a} &= \begin{cases}
+      \mathbf{d}\subb{s} &\when \registers_7 = 2^{64} - 1 \wedge s \in \keys{\mathbf{d}} \\
+      \mathbf{d}[\registers_7] &\when \registers_7 \in \keys{\mathbf{d}} \\
+      \none &\otherwise
+    \end{cases} \\
+    \using \sq{h, o} &= \registers\subrange{8}{2} \\
+    \using z &= \registers_{11} \\
+    \using \mathbf{v} &= \begin{cases}
+      \error &\when \Nrange{h}{32} \not\subseteq \readable{\memory} \\
+      \none &\otherwhen \mathbf{a} = \none \\
+      \histlookup(\mathbf{a}, t, \memory\subrange{h}{32}) &\otherwise \\
+    \end{cases} \\
+    \using f &= \min(\registers_{10}, \len{\mathbf{v}}) \\
+    \using l &= \min(z, \len{\mathbf{v}} - f) \\
+    \tup{\execst', \registers'_7, \memory'\subrange{o}{l}} &\equiv \begin{cases}
+      \tup{\panic, \registers_7, \memory\subrange{o}{l}} &\when \mathbf{v} = \error \vee \Nrange{o}{l} \not\subseteq \writable{\memory}\\
+      \tup{\continue, \mathtt{NONE}, \memory\subrange{o}{l}} &\otherwhen \mathbf{v} = \none \\
+      \tup{\continue, \len{\mathbf{v}}, \mathbf{v}\subrange{f}{l}} &\otherwise \\
+    \end{cases}
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_E(\gascounter, \registers, \memory, \mathbf{e}, \segoff)$ \\
+  \texttt{export} = 8 \\
+  $g = \CgasE$} &
+  $\begin{aligned}
+    \using p &= \registers_7 \\
+    \using z &= \min(\registers_8, \Csegmentsize) \\
+    \using \mathbf{x} &= \begin{cases}
+      \zeropad{\Csegmentsize}{\mem\subrange{p}{z}} &\when \Nrange{p}{z} \subseteq \readable{\memory}\\
+      \error &\otherwise
+    \end{cases}\\
+    \tup{\execst', \registers'_7, \mathbf{e}'} &\equiv \begin{cases}
+      \tup{\panic, \registers_7, \mathbf{e}} &\when \mathbf{x} = \error \\
+      \tup{\continue, \mathtt{FULL}, \mathbf{e}} &\otherwhen \segoff+\len{\mathbf{e}} \ge \Cmaxpackageexports \\
+      \tup{\continue, \segoff + \len{\mathbf{e}}, \mathbf{e} \append \mathbf{x}} &\otherwise
+    \end{cases}
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_M(\gascounter, \registers, \memory, \mathbf{m})$ \\
+  \texttt{machine} = 9 \\
+  $g = \CgasMconst + \fnmemgas(\CgasMlinear, p_Z)$ }&
+  $\begin{aligned}
+    \using \sq{p_O, p_Z, i} &= \registers\subrange{7}{3} \\
+    \using \mathbf{p} &= \begin{cases}
+      \memory\subrange{p_O}{p_Z} &\when \Nrange{p_O}{p_Z} \subseteq \readable{\memory} \\
+      \error &\otherwise
+    \end{cases} \\
+    \using n &= \min(n \in \N : n \not\in \keys{\mathbf{m}}) \\
+    \using \mathbf{u} &= \tup{\is{\ram¬value}{[0, 0, \dots]},\is{\ram¬access}{[\none, \none, \dots]}} \\
+    \tup{\execst', \registers'_7, \mathbf{m}} &\equiv \begin{cases}
+      \tup{\continue, \mathtt{FULL}, \mathbf{m}} &\when \len{\mathbf{m}} \ge 63 \\
+      \tup{\panic, \registers_7, \mathbf{m}} &\otherwhen \mathbf{p} = \error \\
+      \tup{\continue, \mathtt{HUH}, \mathbf{m}} &\otherwhen \deblob(\mathbf{p}, i) = \error \\
+      \tup{\continue, n, \mathbf{m} \cup \set{\kv{n}{\tup{\mathbf{p}, \mathbf{u}, i, \bot}}}} &\otherwise \\
+    \end{cases} \\
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_P(\gascounter, \registers, \memory, \mathbf{m})$ \\
+  \texttt{peek} = 10 \\
+  $g = \CgasPconst + \fnmemgas(\CgasPlinear, z)$ }&
+  $\begin{aligned}
+    \using \sq{n, o, s, z} &= \registers\subrange{7}{4} \\
+    \tup{\execst', \registers'_7, \mem'} &\equiv \begin{cases}
+      \tup{\panic, \registers_7, \mem} &\when \Nrange{o}{z} \not\subseteq \writable{\memory} \\
+      \tup{\continue, \mathtt{WHO}, \mem} &\otherwhen n \not\in \keys{\mathbf{m}} \\
+      \tup{\continue, \mathtt{OOB}, \mem} &\otherwhen \Nrange{s}{z} \not\subseteq \readable{\mathbf{m}\subb{n}_\pg¬ram} \\
+      \tup{\continue, \mathtt{OK}, \mem'} &\otherwise \\
+      \multicolumn{2}{l}{\where \mem' = \mem \exc \mem\subrange{o}{z} = (\mathbf{m}\subb{n}_\pg¬ram)\subrange{s}{z}}
+    \end{cases} \\
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_O(\gascounter, \registers, \memory, \mathbf{m})$ \\
+  \texttt{poke} = 11 \\
+  $g = \CgasOconst + \fnmemgas(\CgasOlinear, z)$ }&
+  $\begin{aligned}
+    \using \sq{n, s, o, z} &= \registers\subrange{7}{4} \\
+    \tup{\execst', \registers'_7, \mathbf{m}'} &\equiv \begin{cases}
+      \tup{\panic, \registers_7, \mathbf{m}} &\when \Nrange{s}{z} \not\subseteq \readable{\memory} \\
+      \tup{\continue, \mathtt{WHO}, \mathbf{m}} &\otherwhen n \not\in \keys{\mathbf{m}} \\
+      \tup{\continue, \mathtt{OOB}, \mathbf{m}} &\otherwhen \Nrange{o}{z} \not\subseteq \writable{\mathbf{m}\subb{n}_\pg¬ram} \\
+      \tup{\continue, \mathtt{OK}, \mathbf{m}'}  &\otherwise \\
+      \multicolumn{2}{l}{\where \mathbf{m}' = \mathbf{m} \exc (\mathbf{m}'\subb{n}_\pg¬ram)\subrange{o}{z} = \mem\subrange{s}{z}}
+    \end{cases} \\
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_Z(\gascounter, \registers, \memory, \mathbf{m})$ \\
+  \texttt{pages} = 12 \\
+  $g =  \begin{cases} \CgasZfreeconst + c \cdot \CgasZfreelinear &\when r = 0 \\ \CgasZallocconst + c \cdot \CgasZalloclinear &\when r \in \set{1, 2} \\ \CgasZsetmodeconst + c \cdot \CgasZsetmodelinear &\when r \in \set{3, 4} \\ \CgasZinvalid &\otherwise \end{cases} $ }&
+  $\begin{aligned}
+    \using \sq{n, p, c, r} &= \registers\subrange{7}{4} \\
+    \using \mathbf{u} &= \begin{cases}
+      \mathbf{m}\subb{n}_\pg¬ram &\when n \in \keys{\mathbf{m}} \\
+      \error &\otherwise\\
+    \end{cases} \\
+    \using \mathbf{u}' &= \mathbf{u} \exc \begin{cases}
+      (\mathbf{u}'_\ram¬value)_{p\Cpvmpagesize\dots+c\Cpvmpagesize} = \begin{cases}
+       \sq{0, 0, \dots} &\when r < 3 \\
+        (\mathbf{u}_\ram¬value)_{p\Cpvmpagesize\dots+c\Cpvmpagesize} &\otherwise
+      \end{cases} \\
+      (\mathbf{u}'_\ram¬access)\subrange{p}{c} = \begin{cases}
+       \sq{\none, \none, \dots} &\when r = 0 \\
+       \sq{\mathrm{R}, \mathrm{R}, \dots} &\when r = 1 \vee r = 3 \\
+       \sq{\mathrm{W}, \mathrm{W}, \dots} &\when r = 2 \vee r = 4 \\
+      \end{cases}
+    \end{cases}\\
+    \tup{\registers'_7, \mathbf{m}'} &\equiv \begin{cases}
+      \tup{\mathtt{WHO}, \mathbf{m}} &\when \mathbf{u} = \error \\
+      \tup{\mathtt{HUH}, \mathbf{m}} &\otherwhen r > 4 \vee p < 16 \vee p+c \ge \nicefrac{2^{32}}{\Cpvmpagesize} \\
+      \tup{\mathtt{HUH}, \mathbf{m}} &\otherwhen r > 2 \wedge (\mathbf{u}_\ram¬access)\subrange{p}{c} \ni \none \\
+      \tup{\mathtt{OK}, \mathbf{m}'} &\otherwise\,,\ \where \mathbf{m}' = \mathbf{m} \exc \mathbf{m}'\subb{n}_\pg¬ram = \mathbf{u}' \\
+    \end{cases} \\
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_K(\gascounter, \registers, \memory, \mathbf{m})$ \\
+  \texttt{invoke} = 13 \\
+  $g = \CgasK + g_R$} &
+  $\begin{aligned}
+    \using \sq{n, o} &= \registers_{7, 8} \\
+    \using \tup{g_R, \mathbf{w}} &= \begin{cases}
+      \tup{g_R, \mathbf{w}}: \encode[8]{g_R} \concat \encode[8]{\mathbf{w}} = \mem\subrange{o}{112} &\when \Nrange{o}{112} \subseteq \writable{\mem} \\
+      %\tup{\decode[8]{\memr\subrange{o}{8}}, \sq{\build{\decode[4]{\memr\subrange{o+8+8x}{8}}}{x \orderedin \Nmax{13}}}} &\when \Nrange{o}{60} \subset \writable_\mem} \\
+      \tup{0, \error} &\otherwise
+    \end{cases} \\
+    \using \tup{c, i', g_R', \pg¬gaschargedflag', \mathbf{w}', \mathbf{u}'} &= \Psi(\mathbf{m}\subb{n}_\pg¬code, \mathbf{m}\subb{n}_\pg¬pc, g_R, \mathbf{m}\subb{n}_{\pg¬gaschargedflag}, \mathbf{w}, \mathbf{m}\subb{n}_\pg¬ram)\\
+    \using \mem^* &= \mem \exc \mem^*\subrange{o}{112} = \encode[8]{g_R'} \concat \encode[8]{\mathbf{w}'}\\
+    \using \mathbf{m}^* &= \mathbf{m} \exc \begin{cases}
+      \mathbf{m}^*\subb{n}_\pg¬ram = \mathbf{u}'\\
+      \mathbf{m}^*\subb{n}_\pg¬pc = \begin{cases}
+        i' + \Fskip(i') + 1 &\when c \in \set{ \host } \times \pvmreg\\
+        i' &\otherwise
+      \end{cases}\\
+      \mathbf{m}^*\subb{n}_{\pg¬gaschargedflag} = \pg¬gaschargedflag'\\
+    \end{cases}\\
+    \gascounter' &\equiv \begin{cases}
+      \gascounter - g &\when \mathbf{w} = \error \vee n \not\in \keys{\mathbf{m}} \vee \gascounter < g \\
+      \gascounter - g + g_R' &\otherwise
+    \end{cases}\\
+    \tup{\execst', \registers'_7, \registers'_8, \mem', \mathbf{m}'} &\equiv \begin{cases}
+      \tup{\panic, \registers_7, \registers_8, \mem, \mathbf{m}} &\when \mathbf{w} = \error \\
+      \tup{\continue, \mathtt{WHO}, \registers_8, \mem, \mathbf{m}} &\otherwhen n \not\in \mathbf{m} \\
+      \tup{\continue, \mathtt{HOST}, h, \mem^*, \mathbf{m}^*} &\otherwhen c = \host \times h \\
+      \tup{\continue, \mathtt{FAULT}, x, \mem^*, \mathbf{m}^*} &\otherwhen c = \fault \times x \\
+      \tup{\continue, \mathtt{OOG}, \registers_8, \mem^*, \mathbf{m}^*} &\otherwhen c = \oog \\
+      \tup{\continue, \mathtt{PANIC}, \registers_8, \mem^*, \mathbf{m}^*} &\otherwhen c = \panic \\
+      \tup{\continue, \mathtt{HALT}, \registers_8, \mem^*, \mathbf{m}^*} &\otherwhen c = \halt \\
+    \end{cases} \\
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_X(\gascounter, \registers, \memory, \mathbf{m})$ \\
+  \texttt{expunge} = 14 \\
+  $g = \CgasX$} &
+  $\begin{aligned}
+    \using n &= \registers_7 \\
+    \tup{\registers'_7, \mathbf{m}'} &\equiv \begin{cases}
+      \tup{\mathtt{WHO}, \mathbf{m}} &\when n \not\in \keys{\mathbf{m}} \\
+      \tup{\mathbf{m}\subb{n}_\pg¬pc, \mathbf{m} \setminus n} &\otherwise \\
+    \end{cases} \\
+  \end{aligned}$\\
+  \bottomrule
+\end{longtable}
+
+\subsection{累积函数 (Accumulate Functions)}\label{sec:accumulatefunctions}
+
+此节定义了若干函数，大致具有以下形式 $(\gascounter' \in \signedgas, \registers' \in \regs, \memory', \tup{\imX', \mathbf{y}'}) = \Omega_\square(\gascounter \in \gas, \registers \in \regs, \memory \in \ram, \imXY \in \implications^2, \dots)$。结果分量与相应参数等价的函数可以在描述中省略这些分量。函数也可能依赖于特定的附加参数。
+
+除了明确规定的 gas 计数器外，\textsc{pvm} 状态的各元素均假定在宿主调用后保持不变，除非另有明确说明。
+\begin{align}
+  \gascounter' &\equiv \gascounter - g\\
+  \tup{\execst', \registers', \memory', \imX', \mathbf{y}'} &\equiv \begin{cases}
+    \tup{\oog, \registers, \memory, \mathbf{x}, \mathbf{y}} &\when \gascounter < g\\
+    \tup{\continue, \registers, \memory, \mathbf{x}, \mathbf{y}} \text{ 如下所述的例外情况} &\otherwise
+  \end{cases}
+\end{align}
+
+\newcommand*{\local¬desiredid}{i}
+
+\begin{longtable}{p{3.5cm} p{12.5cm}}
+  \toprule
+  \thead*{\textbf{函数} \\ \textbf{标识符} \\ \textbf{Gas 用量 (}$g$\textbf{)}} &
+  \thead{\textbf{变更}} \\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \endhead
+  \makecell*[l]{
+  $\Omega_B(\gascounter, \registers, \memory, \imXY)$ \\
+  \texttt{bless} = 15 \\
+  $g = \CgasBconst + n \cdot \CgasBlinear $ }&
+  $\begin{aligned}
+    \using \sq{m, a, v, r, o, n} &= \registers\subrange{7}{6} \\
+    \using \mathbf{a} &= \begin{cases}
+      \decode[4]{\memory\subrange{a}{4\Ccorecount}} &\when \Nrange{a}{4\Ccorecount} \subseteq \readable{\memory} \\
+      \error &\otherwise
+    \end{cases} \\
+    \using \mathbf{z} &= \begin{cases}
+      \set{\build{\kv{s}{g} \ \where \encode[4]{s} \concat \encode[8]{g} = \memory\subrange{o+12i}{12}}{i \in \Nmax{n}}} &\when \Nrange{o}{12n} \subseteq \readable{\memory} \\
+      \error &\otherwise
+    \end{cases} \\
+    \tup{\execst', \registers'_7, (\imX'_\im¬state)_{\tup{\ps¬manager, \ps¬assigners, \ps¬delegator, \ps¬registrar, \ps¬alwaysaccers}}} &= \begin{cases}
+      \tup{\panic, \registers_7, (\imX_\im¬state)_{\tup{\ps¬manager, \ps¬assigners, \ps¬delegator, \ps¬registrar, \ps¬alwaysaccers}}} &\when \set{\mathbf{z}, \mathbf{a}} \ni \error \\
+      \tup{\continue, \mathtt{HUH}, (\imX_\im¬state)_{\tup{\ps¬manager, \ps¬assigners, \ps¬delegator, \ps¬registrar, \ps¬alwaysaccers}}} &\otherwhen \imX_\im¬id \ne (\imX_\im¬state)_\ps¬manager \\
+      \tup{\continue, \mathtt{WHO}, (\imX_\im¬state)_{\tup{\ps¬manager, \ps¬assigners, \ps¬delegator, \ps¬registrar, \ps¬alwaysaccers}}} &\otherwhen \tup{m, v, r} \not\in \serviceid^3 \\
+      \tup{\continue, \mathtt{OK}, \tuple{m, \mathbf{a}, v, r, \mathbf{z}}} &\otherwise \\
+    \end{cases}
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_A(\gascounter, \registers, \memory, \imXY)$ \\
+  \texttt{assign} = 16 \\
+  $g = \CgasA$} &
+  $\begin{aligned}
+    \using \sq{c, o, a} &= \registers\subrange{7}{3} \\
+    \using \mathbf{q} &= \begin{cases}
+      \sq{\build{\memory\subrange{o + 32i}{32}}{i \orderedin \N_\Cauthqueuesize}} &\when \Nrange{o}{32\Cauthqueuesize} \subseteq \readable{\memory} \\
+      \error &\otherwise
+    \end{cases} \\
+    \tup{\execst', \registers'_7, (\imX'_\im¬state)_\ps¬authqueue\subb{c}, (\imX'_\im¬state)_\ps¬assigners\subb{c}} &= \begin{cases}
+      \tup{\panic, \registers_7, (\imX_\im¬state)_\ps¬authqueue\subb{c}, (\imX_\im¬state)_\ps¬assigners\subb{c}} &\when \mathbf{q} = \error \\
+      \tup{\continue, \mathtt{CORE}, (\imX_\im¬state)_\ps¬authqueue\subb{c}, (\imX_\im¬state)_\ps¬assigners\subb{c}} &\otherwhen c \ge \Ccorecount \\
+      \tup{\continue, \mathtt{HUH}, (\imX_\im¬state)_\ps¬authqueue\subb{c}, (\imX_\im¬state)_\ps¬assigners\subb{c}} &\otherwhen \imX_\im¬id \ne (\imX_\im¬state)_\ps¬assigners\subb{c}\\
+      \tup{\continue, \mathtt{WHO}, (\imX_\im¬state)_\ps¬authqueue\subb{c}, (\imX_\im¬state)_\ps¬assigners\subb{c}} &\otherwhen a \not\in \serviceid \\
+      \tup{\continue, \mathtt{OK}, \mathbf{q}, a} &\otherwise \\
+    \end{cases} \\
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_D(\gascounter, \registers, \memory, \imXY)$ \\
+  \texttt{designate} = 17 \\
+  $g = \CgasDconst + z \cdot \CgasDlinear$} &
+  $\begin{aligned}
+    \using \sq{o, z} &= \registers\subrange{7}{2} \\
+    \using \mathbf{v} &= \begin{cases}
+      \sq{\build{\memory\subrange{o + 336i}{336}}{i \orderedin \N_z}} &\when \Nrange{o}{336z} \subseteq \readable{\memory} \\
+      \error &\otherwise
+    \end{cases} \\
+    \tup{\execst', \registers'_7, (\imX'_\im¬state)_\ps¬stagingset} &= \begin{cases}
+      \tup{\panic, \registers_7, (\imX_\im¬state)_\ps¬stagingset} &\when \mathbf{v} = \error\\
+      \tup{\continue, \mathtt{HUH}, (\imX_\im¬state)_\ps¬stagingset} &\otherwhen z \not\in \valcount \vee \imX_\im¬id \ne (\imX_\im¬state)_\ps¬delegator\\
+      \tup{\continue, \mathtt{OK}, \mathbf{v}} &\otherwise \\
+    \end{cases} \\
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_C(\gascounter, \registers, \memory, \imXY)$ \\
+  \texttt{checkpoint} = 18 \\
+  $g = \CgasC$} &
+  $\begin{aligned}
+    \imY' &\equiv \imX \\
+    \registers'_7 &\equiv \gascounter'
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_N(\gascounter, \registers, \memory, \imXY, t)$ \\
+  \texttt{new} = 19 \\
+  $g = \CgasN$} &
+  $\begin{aligned}
+    \using \sq{o, l, \sa¬minaccgas, \sa¬minmemogas, \sa¬gratis, \local¬desiredid} &= \registers\subrange{7}{6} \\
+    \using \sa¬codehash &= \begin{cases}
+      \memory\subrange{o}{32} &\when \Nrange{o}{32} \subseteq \readable{\memory} \wedge l \in \Nbits{32} \\
+      \error &\otherwise
+    \end{cases}\\
+    \using \mathbf{a} \in \serviceaccount \cup \set{\error} &= \begin{cases}
+      \tup{
+        \sa¬codehash,
+        \is{\mathbf{\sa¬storage}}{\emset},
+        \is{\mathbf{\sa¬requests}}{\set{\kv{\tup{c, l}}{\sq{}}}},
+        \is{\sa¬balance}{\mathbf{a}_\sa¬minbalance},
+        \sa¬minaccgas,
+        \sa¬minmemogas,
+        \is{\mathbf{\sa¬preimages}}{\emset},
+        \is{\sa¬created}{t},
+        \sa¬gratis,
+        \is{\sa¬lastacc}{0},
+        \is{\sa¬parent}{\imX_\im¬id}
+      } &\when c \ne \error \\
+      \error &\otherwise
+    \end{cases} \\
+    \using \mathbf{s} &= \imX_\im¬self \exc \mathbf{s}_\sa¬balance = (\imX_\im¬self)_\sa¬balance - \mathbf{a}_\sa¬minbalance \\
+    \tup{\execst', \registers'_7, \imX'_\im¬nextfreeid, (\imX'_\im¬state)_\ps¬accounts} &\equiv \begin{cases}
+      \tup{\panic, \registers_7, \imX_\im¬nextfreeid, (\imX_\im¬state)_\ps¬accounts} &\when c = \error \\
+      \tup{\continue, \mathtt{HUH}, \imX_\im¬nextfreeid, (\imX_\im¬state)_\ps¬accounts} &\otherwhen f \ne 0 \wedge \imX_\im¬id \ne (\imX_\im¬state)_\ps¬manager \\
+      \tup{\continue, \mathtt{CASH}, \imX_\im¬nextfreeid, (\imX_\im¬state)_\ps¬accounts} &\otherwhen \mathbf{s}_\sa¬balance < (\imX_\im¬self)_\sa¬minbalance \\
+      \tup{\continue, \mathtt{FULL}, \imX_\im¬nextfreeid, (\imX_\im¬state)_\ps¬accounts} &\otherwhen \imX_\im¬id = (\imX_\im¬state)_\ps¬registrar \wedge \local¬desiredid < \Cminpublicindex \wedge \local¬desiredid \in \keys{(\imX_\im¬state)_\ps¬accounts} \\
+      \tup{\continue, \local¬desiredid, \imX_\im¬nextfreeid, (\imX_\im¬state)_\ps¬accounts \cup \mathbf{d}} &\otherwhen \imX_\im¬id = (\imX_\im¬state)_\ps¬registrar \wedge \local¬desiredid < \Cminpublicindex \\
+      \multicolumn{2}{l}{\quad \where \mathbf{d} = \set{ \kv{\local¬desiredid}{\mathbf{a}}, \kv{\imX_\im¬id}{\mathbf{s}} }}\\
+      \tup{\continue, \imX_\im¬nextfreeid, i^*, (\imX_\im¬state)_\ps¬accounts \cup \mathbf{d}} &\otherwise \\
+      \multicolumn{2}{l}{\quad \where i^* = \text{check}(\Cminpublicindex + (\imX_\im¬nextfreeid - \Cminpublicindex + 42) \bmod (2^{32} - \Cminpublicindex - 2^8))}\\
+      \multicolumn{2}{l}{\quad \also \mathbf{d} = \set{ \kv{\imX_\im¬nextfreeid}{\mathbf{a}}, \kv{\imX_\im¬id}{\mathbf{s}} }}\\
+    \end{cases} \\
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+    $\Omega_U(\gascounter, \registers, \memory, \imXY)$ \\
+    \texttt{upgrade} = 20 \\
+    $g = \CgasU$
+  } &
+  $\begin{aligned}
+    \using \sq{o, g, m} &= \registers\subrange{7}{3} \\
+    \using c &= \begin{cases}
+      \memory\subrange{o}{32} &\when \Nrange{o}{32} \subseteq \readable{\memory} \\
+      \error &\otherwise
+    \end{cases} \\
+    \tup{\execst', \registers'_7, (\imX'_\im¬self)_\sa¬codehash, (\imX'_\im¬self)_\sa¬minaccgas, (\imX'_\im¬self)_\sa¬minmemogas} &\equiv \begin{cases}
+      \tup{\panic, \registers_7, (\imX_\im¬self)_\sa¬codehash, (\imX_\im¬self)_\sa¬minaccgas, (\imX_\im¬self)_\sa¬minmemogas} &\when c = \error \\
+      \tup{\continue, \mathtt{OK}, c, g, m} &\otherwise \\
+    \end{cases}
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_T(\gascounter, \registers, \memory, \imXY)$ \\
+  \texttt{transfer} = 21 \\
+  $g = \CgasT + t$} &
+  $\begin{aligned}
+    \using \sq{\dx¬dest, \dx¬amount, l, o} &= \registers\subrange{7}{4},  \\
+    \using \mathbf{d} &= (\imX_\im¬state)_\ps¬accounts\\
+    \using \mathbf{t} \in \defxfer \cup \set{\error} &= \begin{cases}
+      \tup{
+        \is{\dx¬source}{\imX_\im¬id},
+        \dx¬dest,
+        \dx¬amount,
+        \is{\dx¬memo}{\memory\subrange{o}{\Cmemosize}},
+        \is{\dx¬gas}{l}
+      } &\when \Nrange{o}{\Cmemosize} \subseteq \readable{\memory} \\
+      \error &\otherwise
+    \end{cases} \\
+    \using b &= (\imX_\im¬self)_\sa¬balance - \dx¬amount \\
+    \using \tup{c, t} &= \begin{cases}
+      \tup{\panic, 0} &\when \mathbf{t} = \error \\
+      \tup{\mathtt{WHO}, 0} &\otherwhen \dx¬dest \not \in \keys{\mathbf{d}} \\
+      \tup{\mathtt{LOW}, 0} &\otherwhen l < \mathbf{d}[\dx¬dest]_\sa¬minmemogas \\
+      \tup{\mathtt{CASH}, 0} &\otherwhen b < (\imX_\im¬self)_\sa¬minbalance \\
+      \tup{\mathtt{OK}, l} &\otherwise
+    \end{cases} \\
+    \tup{\execst', \registers'_7, \imX'_\im¬xfers, (\imX'_\im¬self)_\sa¬balance} &\equiv \begin{cases}
+      \tup{\panic, \registers_7, \imX_\im¬xfers, (\imX_\im¬self)_\sa¬balance} &\when c = \panic \\
+      \tup{\continue, c, \imX_\im¬xfers, (\imX_\im¬self)_\sa¬balance} &\otherwhen c \ne \mathtt{OK} \\
+      \tup{\continue, \mathtt{OK}, \imX_\im¬xfers \append \mathbf{t}, b} &\otherwise
+    \end{cases} \\
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_J(\gascounter, \registers, \memory, \imXY, t)$ \\
+  \texttt{eject} = 22 \\
+  $g = \CgasJ$} &
+  $\begin{aligned}
+    \using \sq{d, o} &= \registers_{7, 8} \\
+    \using h &= \begin{cases}
+      \memory\subrange{o}{32} &\when \Nrange{o}{32} \subseteq \readable{\memory} \\
+      \error &\otherwise
+    \end{cases} \\
+    \using \mathbf{d} &= \begin{cases}
+      (\imX_\im¬state)_\ps¬accounts\subb{d} &\when d \ne \imX_\im¬id \wedge d \in \keys{(\imX_\im¬state)_\ps¬accounts} \\
+      \error &\otherwise \\
+    \end{cases} \\
+    \using l &= \max(81, \mathbf{d}_\sa¬octets) - 81 \\
+    \using \mathbf{s}' &= \imX_\im¬self \exc \mathbf{s}'_\sa¬balance = (\imX_\im¬self)_\sa¬balance + \mathbf{d}_\sa¬balance \\
+    \tup{\execst', \registers'_7, (\imX'_\im¬state)_\ps¬accounts} &\equiv \begin{cases}
+      \tup{\panic, \registers_7, (\imX_\im¬state)_\ps¬accounts} &\when h = \error \\
+      \tup{\continue, \mathtt{WHO}, (\imX_\im¬state)_\ps¬accounts} &\otherwhen \mathbf{d} = \error \vee \mathbf{d}_\sa¬codehash \ne \encode[32]{\imX_\im¬id} \\
+      \tup{\continue, \mathtt{HUH}, (\imX_\im¬state)_\ps¬accounts} &\otherwhen \mathbf{d}_\sa¬items \ne 2 \vee \tup{h, l} \not\in \mathbf{d}_\sa¬requests \\
+      \tup{\continue, \mathtt{OK}, (\imX_\im¬state)_\ps¬accounts \setminus \set{d} \cup \set{ \kv{\imX_\im¬id}{\mathbf{s}'}} } &\otherwhen \mathbf{d}_\sa¬requests\subb{h, l} = \sq{x, y}, y < t - \Cexpungeperiod \\
+      \tup{\continue, \mathtt{HUH}, (\imX_\im¬state)_\ps¬accounts} &\otherwise \\
+    \end{cases} \\
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_Q(\gascounter, \registers, \memory, \imXY)$ \\
+  \texttt{query} = 23 \\
+  $g = \CgasQ$} &
+  $\begin{aligned}
+    \using \sq{o, z} &= \registers_{7, 8} \\
+    \using h &= \begin{cases}
+      \memory\subrange{o}{32} &\when \Nrange{o}{32} \subseteq \readable{\memory} \\
+      \error &\otherwise
+    \end{cases} \\
+    \using \mathbf{a} &= \begin{cases}
+      (\imX_\im¬self)_\sa¬requests\subb{h, z} &\when \tup{h, z} \in \keys{(\imX_\im¬self)_\sa¬requests}\\
+      \error &\otherwise\\
+    \end{cases} \\
+    \tup{\execst', \registers'_7, \registers'_8} &\equiv \begin{cases}
+      \tup{\continue, \mathtt{HUH}, \registers_8} &\when z \not\in \bloblength \\
+      \tup{\panic, \registers_7, \registers_8} &\otherwhen h = \error \\
+      \tup{\continue, \mathtt{NONE}, 0} &\otherwhen \mathbf{a} = \error \\
+      \tup{\continue, 0, 0} &\otherwhen \mathbf{a} = \sq{} \\
+      \tup{\continue, 1 + 2^{32}x, 0} &\otherwhen \mathbf{a} = \sq{x} \\
+      \tup{\continue, 2 + 2^{32}x, y} &\otherwhen \mathbf{a} = \sq{x, y} \\
+      \tup{\continue, 3 + 2^{32}x, y + 2^{32}z} &\otherwhen \mathbf{a} = \sq{x, y, z} \\
+    \end{cases} \\
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_S(\gascounter, \registers, \memory, \imXY, t)$ \\
+  \texttt{solicit} = 24 \\
+  $g = \CgasS$} &
+  $\begin{aligned}
+    \using \sq{o, z} &= \registers_{7, 8} \\
+    \using h &= \begin{cases}
+      \memory\subrange{o}{32} &\when \Nrange{o}{32} \subseteq \readable{\memory} \\
+      \error &\otherwise
+    \end{cases} \\
+    \using \mathbf{a} &= \begin{cases}
+      \imX_\im¬self \text{ 除了: } &\\
+      \quad \mathbf{a}_\sa¬requests\subb{\tup{h, z}} = \sq{} &\when h \ne \error \wedge \tup{h, z} \not\in \keys{(\imX_\im¬self)_\sa¬requests} \\
+      \quad \mathbf{a}_\sa¬requests\subb{\tup{h, z}} = (\imX_\im¬self)_\sa¬requests\subb{\tup{h, z}} \append t &\when (\imX_\im¬self)_\sa¬requests\subb{\tup{h, z}} = \sq{x, y} \\
+      \error &\otherwise\\
+    \end{cases} \\
+    \tup{\execst', \registers'_7, \imX'_\im¬self} &\equiv \begin{cases}
+      \tup{\continue, \mathtt{HUH}, \imX_\im¬self} &\when z \not \in \bloblength \\
+      \tup{\panic, \registers_7, \imX_\im¬self} &\otherwhen h = \error \\
+      \tup{\continue, \mathtt{HUH}, \imX_\im¬self} &\otherwhen \mathbf{a} = \error \\
+      \tup{\continue, \mathtt{FULL}, \imX_\im¬self} &\otherwhen \mathbf{a}_\sa¬balance < \mathbf{a}_\sa¬minbalance \\
+      \tup{\continue, \mathtt{OK}, \mathbf{a}} &\otherwise \\
+    \end{cases} \\
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_F(\gascounter, \registers, \memory, \imXY, t)$ \\
+  \texttt{forget} = 25 \\
+  $g = \CgasF$} &
+  $\begin{aligned}
+    \using \sq{o, z} &= \registers_{7, 8} \\
+    \using h &= \begin{cases}
+      \memory\subrange{o}{32} &\when \Nrange{o}{32} \subseteq \readable{\memory} \\
+      \error &\otherwise
+    \end{cases} \\
+    \using \mathbf{a} &= \begin{cases}
+      \imX_\im¬self \text{ 除了:}\\
+      \quad \left.
+        \begin{aligned}
+          \keys{\mathbf{a}_\sa¬requests} &= \keys{(\imX_\im¬self)_\sa¬requests} \setminus \set{\tup{h, z}}\ ,\\[2pt]
+          \keys{\mathbf{a}_\sa¬preimages} &= \keys{(\imX_\im¬self)_\sa¬preimages} \setminus \set{h}
+        \end{aligned}
+      \ \right\} &\when (\imX_\im¬self)_\sa¬requests\subb{h, z} \in \set{\sq{}, \sq{x, y}},\ y < t - \Cexpungeperiod \\
+      \quad \mathbf{a}_\sa¬requests\subb{h, z} = \sq{x, t} &\when (\imX_\im¬self)_\sa¬requests\subb{h, z} = \sq{x} \\
+      \quad \mathbf{a}_\sa¬requests\subb{h, z} = \sq{w, t} &\when (\imX_\im¬self)_\sa¬requests\subb{h, z} = \sq{x, y, w},\ y < t - \Cexpungeperiod \\
+      \error &\otherwise\\
+    \end{cases} \\
+    \tup{\execst', \registers'_7, \imX'_\im¬self} &\equiv \begin{cases}
+      \tup{\continue, \mathtt{HUH}, \imX_\im¬self} &\when z \not \in \bloblength \\
+      \tup{\panic, \registers_7, \imX_\im¬self} &\otherwhen h = \error \\
+      \tup{\continue, \mathtt{HUH}, \imX_\im¬self} &\otherwhen \mathbf{a} = \error \\
+      \tup{\continue, \mathtt{OK}, \mathbf{a}} &\otherwise \\
+    \end{cases} \\
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_\Taurus(\gascounter, \registers, \memory, \imXY)$ \\
+  \texttt{yield} = 26 \\
+  $g = \CgasTaurus$} &
+  $\begin{aligned}
+    \using o &= \registers_7 \\
+    \using h &= \begin{cases}
+      \memory\subrange{o}{32} &\when \Nrange{o}{32} \subseteq \readable{\memory} \\
+      \error &\otherwise
+    \end{cases} \\
+    \tup{\execst', \registers'_7, \imX'_\im¬yield} &\equiv \begin{cases}
+      \tup{\panic, \registers_7, \imX_\im¬yield} &\when h = \error \\
+      \tup{\continue, \mathtt{OK}, h} &\otherwise \\
+    \end{cases} \\
+  \end{aligned}$\\
+  \cmidrule(lr){1-1}\cmidrule(lr){2-2}
+  \makecell*[l]{
+  $\Omega_\Aries(\gascounter, \registers, \memory, \imXY)$ \\
+  \texttt{provide} = 27 \\
+  $g = \CgasAriesconst + \fnmemgas(\CgasArieslinear, z)$} &
+  $\begin{aligned}
+    \using \sq{o, z} &= \registers_{8, 9} \\
+    \using \mathbf{d} &= (\imX_\im¬state)_\ps¬accounts\\
+    \using s &= \begin{cases}
+      \imX_\im¬id &\when \registers_7 = 2^{64} - 1 \\
+      \registers_7 &\otherwise
+    \end{cases} \\
+    \using \mathbf{i} &= \begin{cases}
+      \memory\subrange{o}{z} &\when \Nrange{o}{z} \subseteq \readable{\memory} \\
+      \error &\otherwise
+    \end{cases} \\
+    \using \mathbf{a} &= \begin{cases}
+      \mathbf{d}[s] &\when s \in \keys{\mathbf{d}} \\
+      \none &\otherwise
+    \end{cases} \\
+    \tup{\execst', \registers'_7, \imX'_\im¬provisions} &\equiv \begin{cases}
+      \tup{\continue, \mathtt{HUH}, \imX_\im¬provisions} &\when z \not \in \bloblength \\
+      \tup{\panic, \registers_7, \imX_\im¬provisions} &\otherwhen \mathbf{i} = \error \\
+      \tup{\continue, \mathtt{WHO}, \imX_\im¬provisions} &\otherwhen \mathbf{a} = \none \\
+      \tup{\continue, \mathtt{HUH}, \imX_\im¬provisions} &\otherwhen \mathbf{a}_\sa¬requests[\tup{\blake{\mathbf{i}}, z}] \ne \sq{} \\
+      \tup{\continue, \mathtt{HUH}, \imX_\im¬provisions} &\otherwhen \tup{s, \mathbf{i}} \in \imX_\im¬provisions \\
+      \tup{\continue, \mathtt{OK}, \imX_\im¬provisions \cup \set{\tup{s, \mathbf{i}}}} &\otherwise \\
+    \end{cases} \\
+  \end{aligned}$\\
+  \bottomrule
+\end{longtable}
+
+\undef{\local¬desiredid}

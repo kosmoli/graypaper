@@ -1,0 +1,10 @@
+\section{Beefy 分发 (Beefy Distribution)}
+\label{sec:beefy}
+
+对于验证者导入的每个已终结区块 $\block$，该验证者应在 \textsc{bls}\oldstylenums{12}-\oldstylenums{381} 曲线上进行 \textsc{bls} 签名，如 \cite{bls12-381} 所定义，确认该区块最近的 \textsc{Beefy} \textsc{mmr} 的 Keccak 哈希。该签名应与签名材料一起免费发布和分发。这些签名可以被聚合，以便向第三方系统提供简洁的终结性证明。签名和聚合机制由 \cite{cryptoeprint:2022/1611} 完整定义。
+
+形式上，令 $\accoutcommitment{v}$ 为验证者索引 $v$ 将发布的签名承诺：
+\begin{align}\label{eq:accoutsignedcommitment}
+  \accoutcommitment{v} &\equiv \blssigndata{\activeset'\subb{v}\sub{\vk¬bls}}{\Xbeefy \concat \text{last}(\recenthistory)_\rh¬accoutlogsuperpeak}\\
+  \Xbeefy &= \token{\$jam\_beefy}
+\end{align}

@@ -1,0 +1,317 @@
+\section{状态 Merklization（State Merklization）}\label{sec:statemerklization}
+
+Merklization 过程定义了一种密码学承诺，通过该承诺可以以简洁和快速的方式证明状态中的任意信息是真实的。我们分两个阶段来描述；第一阶段定义了从 31 八位字节序列到（无限长度）八位字节序列的映射，此过程称为\emph{状态序列化}（state serialization）。第二阶段从此映射形成一个 32 八位字节的承诺，此过程称为\emph{Merklization}。
+
+\subsection{序列化（Serialization）}
+
+状态的序列化主要涉及将 $\thestate$ 的所有各种组件放入一个从 31 八位字节序列\emph{状态键}到不定长度八位字节序列的单一映射中。状态键由哈希组件和章组件构造，等价于状态组件的索引，或者在 $\accounts$ 的内部字典的情况下，服务索引。
+
+我们定义状态键构造函数 $C$ 为：
+\begin{equation}
+  C\colon\abracegroup{
+    \Nbits{8} \cup \tup{\Nbits{8}, \serviceid} \cup \tup{\serviceid, \blob} &\to \blob[31] \\
+    i \in \Nbits{8} &\mapsto \sq{i, 0, 0, \dots} \\
+    \tup{i, s \in \serviceid} &\mapsto \sq{i, n_0, 0, n_1, 0, n_2, 0, n_3, 0, 0, \dots}\ \where n = \encode[4]{s} \\
+    \tup{s, h} &\mapsto \sq{n_0, a_0, n_1, a_1, n_2, a_2, n_3, a_3, a_4, a_5, \dots, a_{26}}\ \where n = \encode[4]{s}, a = \blake{h}
+  }
+\end{equation}
+
+状态序列化随后定义为由各组件合并构建的字典。密码学哈希确保在给定 $C$ 没有重复输入的情况下不会出现重复的状态键。形式上，我们定义 $T$ 将某个状态 $\thestate$ 转换为其序列化形式：
+\begin{equation}
+  T(\thestate) \equiv \abracegroup{
+    &&C(1) &\mapsto \encode{\sq{\build{\var{x}}{x \orderedin \authpool}}} \;, \\
+    &&C(2) &\mapsto \encode{\authqueue} \;, \\
+    &&C(3) &\mapsto \encode{
+      \var{\sq{\build{
+        \tup{\rh¬headerhash, \rh¬accoutlogsuperpeak, \rh¬stateroot, \encode[4]{\rh¬timeslot}, \var{\rh¬reportedpackagehashes}}
+      }{
+        \tup{\rh¬headerhash, \rh¬accoutlogsuperpeak, \rh¬stateroot, \rh¬timeslot, \rh¬reportedpackagehashes} \orderedin \recenthistory
+      }}},
+      \mmrencode{\accoutbelt}
+    } \;, \\
+    &&C(4) &\mapsto \encode{
+      \var{\pendingset},
+      \epochroot,
+      \abracegroupboth{
+        0\ &\when \sealtickets \in \sequence[\Cepochlen]{\safroleticket}\\
+        1\ &\when \sealtickets \in \sequence[\Cepochlen]{\bskey}\\
+      },
+      \sealtickets,
+      \var{\ticketaccumulator}
+    } \;, \\
+    &&C(5) &\mapsto \encode{
+      \var{\sqorderby{x}{x \in \goodset}},
+      \var{\sqorderby{x}{x \in \badset}},
+      \var{\sqorderby{x}{x \in \wonkyset}},
+      \var{\sqorderby{x}{x \in \offenders}}
+    } \;, \\
+    &&C(6) &\mapsto \encode{\entropy} \;, \\
+    &&C(7) &\mapsto \encode{\var{\stagingset}} \;, \\
+    &&C(8) &\mapsto \encode{\var{\activeset}} \;, \\
+    &&C(9) &\mapsto \encode{\var{\previousset}} \;, \\
+    &&C(10) &\mapsto \encode{
+      \sq{\build{
+        \maybe{\tup{\aa¬guarantee, \encode[4]{\aa¬timestamp}}}
+      }{
+        \tup{\aa¬guarantee, \aa¬timestamp} \orderedin \availassignments
+      }}
+    } \;, \\
+    &&C(11) &\mapsto \encode[4]{\thetime} \;, \\
+    &&C(12) &\mapsto \encode{
+      \encode[4]{\manager, \assigners, \delegator, \registrar},
+      \alwaysaccers
+    } \;, \\
+    &&C(13) &\mapsto \encode{
+      \var{\sq{\build{\encode[4]{\mathbf{v}}}{\mathbf{v} \orderedin \valstatsaccumulator}}},
+      \var{\sq{\build{\encode[4]{\mathbf{v}}}{\mathbf{v} \orderedin \valstatsprevious}}},
+      \corestats,
+      \servicestats
+    } \;, \\
+    &&C(14) &\mapsto \encode{
+      \sq{\build{
+        \var{\sq{\build{
+          \tup{\mathbf{r}, \var{\mathbf{d}}}
+        }{
+          \tup{\mathbf{r}, \mathbf{d}} \orderedin \mathbf{i}
+        }}}
+      }{
+        \mathbf{i} \orderedin \ready
+      }}
+    } \;, \\
+    &&C(15) &\mapsto \encode{
+      \sq{\build{\var{\mathbf{i}}}{\mathbf{i} \orderedin \accumulated}}
+    } \;, \\
+    &&C(16) &\mapsto \encode{
+      \var{\sq{\build{\tup{\encode[4]{s}, \encode{h}}}{\tup{s, h} \orderedin \lastaccout}}}
+    } \;, \\
+    \forall \kv{s}{\saX} \in \accounts: &&C(255, s) &\mapsto \encode{
+      0,
+      \saX_\sa¬codehash,
+      \encode[8]{
+        \saX_\sa¬balance,
+        \saX_\sa¬minaccgas,
+        \saX_\sa¬minmemogas,
+        \saX_\sa¬octets,
+        \saX_\sa¬gratis
+      },
+      \encode[4]{
+        \saX_\sa¬items,
+        \saX_\sa¬created,
+        \saX_\sa¬lastacc,
+        \saX_\sa¬parent
+      }
+    } \;, \\
+    \forall \kv{s}{\saX} \in \accounts, \kv{\mathbf{k}}{\mathbf{v}} \in \saX_\sa¬storage:
+      &&C(s, \encode[4]{2^{32}-1} \concat \mathbf{k}) &\mapsto \mathbf{v} \;, \\
+    \forall \kv{s}{\saX} \in \accounts, \kv{h}{\mathbf{p}} \in \saX_\sa¬preimages:
+      &&C(s, \encode[4]{2^{32}-2} \concat h) &\mapsto \mathbf{p} \;, \\
+    \forall \kv{s}{\saX} \in \accounts, \kv{\tup{h, l}}{\mathbf{t}} \in \saX_\sa¬requests:
+      &&C(s, \encode[4]{l} \concat h) &\mapsto \encode{
+        \var{\sq{\build{\encode[4]{x}}{x \orderedin \mathbf{t}}}}
+      }
+  }
+\end{equation}
+
+注意，大多数行描述了从自然数派生的键到状态组件序列化的单一映射。然而，最后四行各自定义了一组映射，因为这些项作用于所有服务账户，并且在最后三行的情况下，作用于服务内嵌套字典的键。
+
+还要注意，状态中所有非判别器数字序列化都根据项的大小以固定长度完成。
+
+最后，请注意 \Jam 不允许直接检查或枚举服务存储键。因此，实现不需要知道键值本身，只有 Merklisation 就绪的序列化才是重要的，它是固定大小的哈希（与服务索引和项标记一起）。实现可以利用这一事实来避免存储键本身。
+
+\subsection{Merklization}
+
+定义了 $T$ 后，我们现在定义 $\fnmerklizestate$ 的其余部分，主要涉及将序列化映射转换为密码学承诺。我们将此承诺定义为二叉 Patricia Merkle Trie 的根，其格式针对现代计算硬件进行了优化，主要是通过优化大小以简洁地适配典型的内存布局并减少不可预测分支的需要。
+
+\subsubsection{节点编码和 Trie 标识（Node Encoding and Trie Identification）}
+我们将（子）trie 标识为其根节点的哈希，有一个例外：空的（子）trie 被标识为零哈希 $\zerohash$。
+
+节点固定大小为 512 位（64 字节）。每个节点要么是分支要么是叶节点。第一个位区分这两种类型。
+
+在分支的情况下，剩余的 511 位在两个子节点哈希之间分配，使用 0 位（左）子 trie 标识的最后 255 位和 1 位（右）子 trie 标识的全部 256 位。
+
+叶节点进一步细分为嵌入值叶节点和普通叶节点。节点的第二个位区分这两种情况。
+
+在嵌入值叶节点的情况下，第一字节的剩余 6 位用于存储嵌入值大小。随后的 31 字节专用于状态键。最后 32 字节定义为值，如果其长度小于 32 字节则用零填充。
+
+在普通叶节点的情况下，第一字节的剩余 6 位置零。随后的 31 字节存储状态键。最后 32 字节存储值的哈希。
+
+形式上，我们定义编码函数 $B$ 和 $L$：
+\begin{align}
+  B&\colon\abracegroup{
+    \tuple{\hash, \hash} &\to \bitstring[512]\\
+    \tup{l, r} &\mapsto \sq{0} \concat \text{bits}(l)\interval{1}{} \concat \text{bits}(r)
+  }\\
+  L&\colon\abracegroup{
+    \tuple{\blob[31], \blob} &\to \bitstring[512]\\
+    \tup{k, v} &\mapsto \begin{cases}
+      \sq{1, 0} \concat \text{bits}(\encode[1]{\len{v}})\interval{2}{} \concat \text{bits}(k) \concat \text{bits}(v) \concat \sq{0, 0, \dots} &\when \len{v} \le 32\\
+      \sq{1, 1, 0, 0, 0, 0, 0, 0} \concat \text{bits}(k) \concat \text{bits}(\blake{v}) &\otherwise
+    \end{cases}
+  }
+\end{align}
+
+然后我们可以将基本 Merklization 函数 $\fnmerklizestate$ 定义为：
+\begin{align}
+  \merklizestate{\thestate} &\equiv M(\set{\build{\kv{\text{bits}(k)}{\tup{k, v}}}{\kv{k}{v} \in T(\thestate) }})\\
+  M(d: \dictionary{\bitstring}{\tuple{\blob[31], \blob}}) &\equiv \begin{cases}
+    \zerohash &\when \len{d} = 0\\
+    \blake{\text{bits}^{-1}(L(k, v))} &\when \values{d} = \set{ \tup{k, v} }\\
+    \blake{\text{bits}^{-1}(B(M(l), M(r)))} &\otherwise\\
+    \multicolumn{2}{l}{\quad\where \forall b, p: \kv{b}{p} \in d \Leftrightarrow \kv{b\interval{1}{}}{p} \in \begin{cases}
+      l &\when b_0 = 0 \\
+      r &\when b_0 = 1
+    \end{cases}
+  }\end{cases}
+\end{align}
+
+\section{通用 Merklization（General Merklization）}\label{sec:merklization}
+
+\subsection{二叉 Merkle 树（Binary Merkle Trees）}
+
+Merkle 树是一种密码学数据结构，产生对特定值序列的哈希承诺。它为包含提供 $O(N)$ 的计算和 $O(\log(N))$ 的证明大小。这种\emph{完全平衡}的表述确保任何叶节点的最大深度最小，并且该深度处的叶节点数量也最小。
+
+我们 Merkle 树的底层函数是\emph{节点}函数 $N$，它接受某个长度 $n$ 的 blob 序列，并返回这样一个 blob 或一个哈希：
+\begin{equation}
+  N\colon\abracegroup{
+    \tuple{\sequence{\blob[n]}, \blob \to \hash} &\to \blob[n] \cup \hash \\
+    \tup{\mathbf{v}, H} &\mapsto \begin{cases}
+      \zerohash &\when \len{\mathbf{v}} = 0 \\
+      \mathbf{v}_0 &\when \len{\mathbf{v}} = 1 \\
+      H(\token{\$node} \concat N(\mathbf{v}_{\dots\ceil{\nicefrac{\len{\mathbf{v}}}{2}}}, H) \concat N(\mathbf{v}_{\ceil{\nicefrac{\len{\mathbf{v}}}{2}}\dots}, H)) &\otherwise
+    \end{cases}
+  }\label{eq:merklenode}
+\end{equation}
+
+敏锐的读者会意识到，如果我们的 $\blob[n]$ 恰好等价于 $\hash$，那么此函数将始终计算为 $\hash$。话虽如此，为使其安全，必须注意确保不存在原像碰撞的可能性。为此目的，我们包含哈希前缀 $\token{\$node}$ 以最小化这种可能性；只需确保任何项都用不同的前缀进行哈希，系统就可以被认为是安全的。
+
+我们还定义了\emph{跟踪}（trace）函数 $T$，它在遍历树到达给定索引项对应的叶节点时，从上到下返回每个对侧节点。它在创建数据包含的证明中很有用。
+\begin{equation}
+  T\colon\abracegroup{
+    \tuple{\sequence{\blob[n]}, \Nmax{\len{\mathbf{v}}}, \blob \to \hash}\ &\to \sequence{\blob[n] \cup \hash}\\
+    \tup{\mathbf{v}, i, H} &\mapsto \begin{cases}
+     \sq{N(P^\bot(\mathbf{v}, i), H)} \concat T(P^\top(\mathbf{v}, i), i - P_I(\mathbf{v}, i), H) &\when \len{\mathbf{v}} > 1\\
+      \sq{} &\otherwise\\
+      \multicolumn{2}{l}{
+        \begin{aligned}
+          \quad \where P^s(\mathbf{v}, i) &\equiv \begin{cases}
+            \mathbf{v}_{\dots\ceil{\nicefrac{\len{\mathbf{v}}}{2}}} &\when (i < \ceil{\nicefrac{\len{\mathbf{v}}}{2}}) = s\\
+            \mathbf{v}_{\ceil{\nicefrac{\len{\mathbf{v}}}{2}}\dots} &\otherwise
+          \end{cases}\\[4pt]
+          \quad \also P_I(\mathbf{v}, i) &\equiv \begin{cases}
+            0 &\when i < \ceil{\nicefrac{\len{\mathbf{v}}}{2}} \\
+            \ceil{\nicefrac{\len{\mathbf{v}}}{2}} &\otherwise
+          \end{cases}\\
+        \end{aligned}
+      }
+    \end{cases}\\
+  }
+\end{equation}
+
+由此我们定义其他 Merklization 函数。
+
+\subsubsection{完全平衡树（Well-Balanced Tree）}
+我们将完全平衡二叉 Merkle 函数定义为 $\fnmerklizewb$：
+\begin{equation}
+    \fnmerklizewb\colon \abracegroup{
+      \label{eq:simplemerkleroot}
+      \tuple{\sequence{\blob}, \blob \to \hash} &\to \hash \\
+      \tup{\mathbf{v}, H} &\mapsto \begin{cases}
+        H(\mathbf{v}_0) &\when \len{\mathbf{v}} = 1 \\
+        N(\mathbf{v}, H) &\otherwise
+      \end{cases} \\
+    }
+\end{equation}
+
+这适用于对长度不超过 32 八位字节的数据创建证明，因为它避免了对序列中每个项进行哈希。对于具有较大数据项的序列，最好事先对它们进行哈希以确保证明大小最小，因为每个证明通常包含一个数据项。
+
+注意：在未提供哈希函数参数 $H$ 的情况下，我们可以假定使用 Blake 2b。
+
+\subsubsection{常数深度树（Constant-Depth Tree）}
+我们将常数深度二叉 Merkle 函数定义为 $\fnmerklizecd$。我们定义两个对应的子树页面操作函数 $\fnmerklejustsubpath{x}$ 和 $\fnmerklesubtreepage{x}$。后者提供一个叶节点页面，即已哈希的前缀数据。前者提供到单个页面的 Merkle 路径。两者都假设大小对齐的 $2^x$ 大小页面并接受页面索引。
+\begin{align}
+  \label{eq:constantdepthmerkleroot}
+  \fnmerklizecd&\colon \abracegroup{
+    \tuple{\sequence{\blob}, \blob \to \hash} &\to \hash\\
+    \tup{\mathbf{v}, H} &\mapsto N(C(\mathbf{v}, H), H)
+  }\\
+  \label{eq:constantdepthsubtreemerklejust}
+  \fnmerklejustsubpath{x}&\colon \abracegroup{
+    \tuple{\sequence{\blob}, \Nmax{\len{\mathbf{v}}}, \blob \to \hash} &\to \sequence{\hash}\\
+    \tup{\mathbf{v}, i, H} &\mapsto T(C(\mathbf{v}, H), 2^xi, H)_{\dots\max(0, \ceil{\log_2(\max(1, \len{\mathbf{v}})) - x})}
+  }\\
+  \label{eq:constantdepthsubtreemerkleleafpage}
+  \fnmerklesubtreepage{x}&\colon \abracegroup{
+    \tuple{\sequence{\blob}, \Nmax{\len{\mathbf{v}}}, \blob \to \hash} &\to \sequence{\hash}\\
+    \tup{\mathbf{v}, i, H} &\mapsto \sq{\build{H(\token{\$leaf} \concat l)}{l \orderedin \mathbf{v}_{2^xi \dots \min(2^xi+2^x, \len{\mathbf{v}})}}}
+  }
+\end{align}
+
+为了让后一个证明 $\fnmerklejustsubpath{x}$ 可接受，我们必须假设目标观察者不仅知道给定索引处项的值，还知道其 $2^x$ 大小子树中的所有其他叶节点，由 $\fnmerklesubtreepage{x}$ 给出。
+
+如上所述，我们可以假设 $H$ 的默认值为 Blake 2b。
+
+对于证明和 Merkle 根计算，应用了一个常数预处理器函数 $C$，它用固定前缀"leaf"对所有数据项进行哈希，然后将总大小填充到下一个二的幂，使用零哈希 $\zerohash$：
+\begin{equation}
+  C\colon\abracegroup{
+    \tuple{\sequence{\blob}, \blob \to \hash} &\to \sequence{\hash}\\
+    \tup{\mathbf{v}, H} &\mapsto \mathbf{v}' \ \where \abracegroup[\;]{
+      \len{\mathbf{v}'} &= 2^{\ceil{\log_2(\max(1, \len{\mathbf{v}}))}}\\
+      \mathbf{v}'\sub{i} &= \begin{cases}
+        H(\token{\$leaf} \concat \mathbf{v}\sub{i}) &\when i < \len{\mathbf{v}}\\
+        \zerohash &\otherwise \\
+      \end{cases}
+    }
+  }
+\end{equation}
+
+\subsection{Merkle 山脉范围和带（Merkle Mountain Ranges and Belts）}\label{sec:mmr}
+
+Merkle Mountain Range（\textsc{mmr}）是一种仅追加的密码学数据结构，产生对值序列的承诺。向 \textsc{mmr} 追加以及其中某个项的包含证明，对于集合大小都是 $O(\log(N))$ 的时间和空间。
+
+我们将 Merkle Mountain Range 定义为在集合 $\sequence{\optional{\hash}}$ 中的峰序列，每个峰是包含 $2^i$ 个项的 Merkle 树的根，其中 $i$ 是序列中的索引。由于我们支持非总是二的幂减一的集合大小，某些峰可能是空的，即 $\none$ 而非 Merkle 根。
+
+由于哈希序列作为承诺有些不便，Merkle Mountain Range 通常在发布前被哈希。对它们进行哈希会移除进一步追加的可能性，因此范围本身保存在需要生成未来证明的系统上。
+
+我们将 \textsc{mmb} 追加函数 $\fnmmrappend$ 定义为：
+\begin{equation}
+  \begin{aligned}
+    \label{eq:mmrappend}
+    \fnmmrappend&\colon\deffunc{
+      \tuple{\sequence{\optional{\hash}}, \hash, \blob\to\hash} &\to \sequence{\optional{\hash}}\\
+      \tup{\mathbf{r}, l, H} &\mapsto P(\mathbf{r}, l, 0, H)
+    }\\
+    \where P&\colon\deffunc{
+      \tuple{\sequence{\optional{\hash}}, \hash, \N, \blob\to\hash} &\to \sequence{\optional{\hash}}\\
+      \tup{\mathbf{r}, l, n, H} &\mapsto \begin{cases}
+        \mathbf{r} \append l &\when n \ge \len{\mathbf{r}}\\
+        R(\mathbf{r}, n, l) &\when n < \len{\mathbf{r}} \wedge \mathbf{r}\sub{n} = \none\\
+        P(R(\mathbf{r}, n, \none), H(\mathbf{r}\sub{n} \concat l), n + 1, H) &\otherwise
+      \end{cases}
+    }\\
+    \also R&\colon\deffunc{
+      \tuple{\sequence{T}, \N, T} &\to \sequence{T}\\
+      \tup{\mathbf{s}, i, v} &\mapsto \mathbf{s}'\ \where \mathbf{s}' = \mathbf{s} \exc \mathbf{s}'\sub{i} = v
+    }
+  \end{aligned}
+\end{equation}
+
+我们将 \textsc{mmr} 编码函数定义为 $\fnmmrencode$：
+\begin{equation}
+  \fnmmrencode\colon\deffunc{
+    \sequence{\optional{\hash}} &\to \blob \\
+    \mathbf{b} &\mapsto \encode{\var{\sq{\build{\maybe{x}}{x \orderedin \mathbf{b}}}}}
+  }
+\end{equation}
+
+我们将 \textsc{mmr} 超级峰函数定义为 $\fnmmrsuperpeak$：
+\begin{equation}
+  \fnmmrsuperpeak\colon\deffunc{
+    \sequence{\optional{\hash}} &\to \hash \\
+    \mathbf{b} &\mapsto \begin{cases}
+      \zerohash &\when \len{\mathbf{h}} = 0\\
+      \mathbf{h}_0 &\when \len{\mathbf{h}} = 1\\
+      \keccak{\token{\$peak} \concat \mmrsuperpeak{\mathbf{h}_{\dots\len{\mathbf{h}}-1}} \concat \mathbf{h}_{\len{\mathbf{h}}-1}} &\otherwise \\
+      \multicolumn{2}{l}{\where \mathbf{h} = \sq{\build{h}{h \orderedin \mathbf{b}, h \ne \none}}}
+    \end{cases}
+  }
+\end{equation}

@@ -1,0 +1,30 @@
+\section{置乱 (Shuffling)}\label{sec:shuffle}
+
+Fisher-Yates 置乱函数形式上定义为：
+\begin{equation}\label{eq:suffle}
+  \forall T, l \in \N: \fnfyshuffle\colon\abracegroup{
+    \tuple{\sequence[l]{T}, \sequence[l:]{\N}} &\to \sequence[l]{T}\\
+    \tup{\mathbf{s}, \mathbf{r}} &\mapsto \begin{cases}
+      \sq{\mathbf{s}_{\mathbf{r}_0 \bmod l}} \concat \fyshuffle{\mathbf{s}'\sub{\dots l-1}, \mathbf{r}\sub{1\dots}}\ \where \mathbf{s}' = \mathbf{s} \exc \mathbf{s'}\sub{\mathbf{r}_0 \bmod l} = \mathbf{s}\sub{l - 1} &\when \mathbf{s} \ne \sq{}\\
+      \sq{} &\otherwise
+    \end{cases}
+  }
+\end{equation}
+
+由于基于某种哈希形式的随机种子来置乱序列通常很有用，我们提供了置乱函数 $\fnfyshuffle$ 的第二种形式，它接受一个 32 字节的哈希值而非数字序列。我们将 $\fnseqfromhash{}$，即从哈希生成数字序列的函数，定义如下：
+\begin{align}
+  \forall l \in \N:\ \fnseqfromhash{l}&\colon\abracegroup{
+    \hash &\to \sequence[l]{\Nbits{32}}\\
+    h &\mapsto \sq{\build{
+      \decode[4]{\blake{h \concat \encode[4]{\floor{\nicefrac{i}{8}}}}
+      \sub{4i \bmod 32 \dots+4}}
+    }{
+      i \orderedin \N\sub{l}
+    }}
+  }\\
+  \label{eq:sequencefromhash}
+  \forall T, l \in \N:\ \fnfyshuffle&\colon\abracegroup{
+    \tuple{\sequence[l]{T}, \hash} &\to \sequence[l]{T}\\
+    \tup{\mathbf{s}, h} &\mapsto \fyshuffle{\mathbf{s}, \seqfromhash{l}{h}}
+  }
+\end{align}

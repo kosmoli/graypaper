@@ -1,0 +1,194 @@
+\section{统计 (Statistics)}\label{sec:bookkeeping}
+
+\subsection{验证者活动 (Validator Activity)}
+
+JAM 链不直接发放奖励——我们将此作为质押子系统的工作（在 Polkadot 的情况下，设想为系统平行链——在当前公共 JAM 网络的想象中免费托管）。然而，与验证者惩罚信息类似，JAM 链促进验证者活动信息到达质押子系统以便采取行动是很重要的。
+
+此类性能信息不能直接覆盖验证者活动的所有方面；虽然区块生产、担保者报告和可用性保证可以轻松在链上跟踪，但 \textsc{Grandpa}、\textsc{Beefy} 和审计活动不能。在后一种情况下，这通过验证者投票活动来跟踪：验证者对彼此努力的印象进行投票，中位数可以被接受为任何给定验证者的真实情况。在假设 50\% 诚实验证者的情况下，这提供了预言机化此信息的充分手段。
+
+验证者统计以每纪元为基础进行，我们保留一条已完成统计的记录（$\valstatsprevious$）以及一条作为当前纪元累加器的记录（$\valstatsaccumulator$）。对于每个纪元，我们跟踪每个验证者的性能记录。与下一节定义的核心和服务统计 $\corestats$ 和 $\servicestats$ 一起，这些构成 $\activity$，因此是一个四元素元组。
+\begin{align}\label{eq:activityspec}
+  \activity &\equiv \tup{\valstatsaccumulator, \valstatsprevious, \corestats, \servicestats}\\
+  \tuple{\valstatsaccumulator, \valstatsprevious} &\in \sequence{\tuple{
+    \isa{\vs¬blocks}{\N}\,,
+    \isa{\vs¬tickets}{\N}\,,
+    \isa{\vs¬preimagecount}{\N}\,,
+    \isa{\vs¬preimagesize}{\N}\,,
+    \isa{\vs¬guarantees}{\N}\,,
+    \isa{\vs¬assurances}{\N}
+%    \isa{\mathbf{u}}{\sequence[\Cvalcount]{\N}}
+  }}^2
+  \!\!\!\!\!\!\!\!\!\!\\
+  \len{\valstatsaccumulator} &= \len{\activeset}\ , \qquad \len{\valstatsprevious} = \len{\previousset}
+\end{align}
+
+我们跟踪的六项验证者统计是：
+\begin{description}
+  \item[$\vs¬blocks$] 验证者生产的区块数量。
+  \item[$\vs¬tickets$] 验证者引入的票据数量。
+  \item[$\vs¬preimagecount$] 验证者引入的预映像数量。
+  \item[$\vs¬preimagesize$] 验证者引入的所有预映像的总八位字节数。
+  \item[$\vs¬guarantees$] 验证者担保的报告数量。
+  \item[$\vs¬assurances$] 验证者做出的可用性保证数量。
+%  \item[$\mathbf{u}$] The number of audit announcements made by that validator as seen by other validators. This forms a subjective statistic
+\end{description}
+
+%The latter item is not a direct measure of the number of audits performed by the validator, but rather the number of times that other validators have seen the validator announce an audit. This is a measure of the validator's activity in the auditing process.
+
+客观统计按其描述更新，形式化地：
+\begin{align}
+  \begin{split}
+    \valstatsaccumulator^\dagger &\equiv \valstatsaccumulator \text{ except } \forall v \in \Nmax{\len{\activeset}}: \\
+    \valstatsaccumulator^\dagger\subb{v}_\vs¬assurances &=
+      \valstatsaccumulator\subb{v}_\vs¬assurances +
+        (\exists a \in \xtassurances : a_\xa¬assurer = v)
+  \end{split} \\
+  \begin{split}
+    \tup{\valstatsaccumulator^\ddagger, \valstatsprevious'} &\equiv \begin{cases}
+      \tup{\valstatsaccumulator^\dagger, \valstatsprevious} &\when e' = e \\
+      \tup{\sq{\tup{0, \dots}, \dots}, \valstatsaccumulator^\dagger} &\otherwise
+    \end{cases} \\
+    \where e &= \ffrac{\thetime}{\Cepochlen} \ ,\quad e' = \ffrac{\thetime'}{\Cepochlen}
+  \end{split} \\
+  \begin{split}
+    \valstatsaccumulator' &\equiv \valstatsaccumulator^\ddagger \text{ except } \forall v \in \Nmax{\len{\activeset'}}: \\
+    \valstatsaccumulator'\subb{v}_\vs¬blocks &=
+      \valstatsaccumulator^\ddagger\subb{v}_\vs¬blocks + (v = \H_\¬authorindex)\\
+    \valstatsaccumulator'\subb{v}_\vs¬tickets &=
+      \valstatsaccumulator^\ddagger\subb{v}_\vs¬tickets + \begin{cases}
+        \len{\xttickets} &\when v = \H_\¬authorindex \\
+        0 &\otherwise
+      \end{cases}\\
+    \valstatsaccumulator'\subb{v}_\vs¬preimagecount &=
+      \valstatsaccumulator^\ddagger\subb{v}_\vs¬preimagecount + \begin{cases}
+        \len{\xtpreimages} &\when v = \H_\¬authorindex \\
+        0 &\otherwise
+      \end{cases}\\
+    \valstatsaccumulator'\subb{v}_\vs¬preimagesize &=
+      \valstatsaccumulator^\ddagger\subb{v}_\vs¬preimagesize + \begin{cases}
+        \sum_{d \in \xtpreimages}\len{d} &\when v = \H_\¬authorindex \\
+        0 &\otherwise
+      \end{cases}\\
+    \valstatsaccumulator'\subb{v}_\vs¬guarantees &=
+      \valstatsaccumulator^\ddagger\subb{v}_\vs¬guarantees + (\activeset'\sub{v} \in \reporters)
+  \end{split}
+\end{align}
+
+注意 $\reporters$ 是\emph{报告者}集合，如公式 \ref{eq:guarantorsig} 中所定义。
+
+
+
+\subsection{核心与服务 (Cores and Services)}
+
+统计的另外两个组成部分是核心和服务活动统计。与验证者统计在整个纪元上跟踪不同，这些仅按每区块跟踪。
+\begin{align}
+  \corestats &\in \sequence[\Ccorecount]{\tuple{
+    \begin{alignedat}{7}
+      \isa{\cs¬daload&}{\N}\,,\;
+      \isa{&\cs¬popularity&}{\N}\,,\;
+      \isa{&\cs¬importcount&}{\N}\,,\;
+      \isa{&\cs¬xtcount&}{\N}\,,\;\\
+      \isa{\cs¬xtsize&}{\N}\,,\;
+      \isa{&\cs¬exportcount&}{\N}\,,\;
+      \isa{&\cs¬bundlelen&}{\N}\,,\;
+      \isa{&\cs¬gasused&}{\gas}
+    \end{alignedat}
+  }}\\
+  \servicestats &\in \dictionary{\serviceid}{\tuple{
+    \begin{alignedat}{3}
+      \isa{\ss¬provision&}{\tup{\N, \N}}\,,\;
+      \isa{&\ss¬refinement&}{\tup{\N, \gas}}\,,\;\\
+      \isa{\ss¬importcount&}{\N}\,,\;
+      \isa{\ss¬xtcount}{\N}\,,\;
+      \isa{&\ss¬xtsize&}{\N}\,,\;
+      \isa{\ss¬exportcount}{\N}\,,\;\\
+      \isa{\ss¬accumulation&}{\tup{\N, \N, \gas}}
+    \end{alignedat}
+  }}
+\end{align}
+
+核心统计使用来自整体状态转换函数的若干中间值更新；$\incomingreports$，传入工作报告，如 \ref{eq:incomingworkreports} 中所定义；$\justbecameavailable$，新变为可用的工作报告，如 \ref{eq:availableworkreports} 中所定义。我们定义统计如下：
+\begin{align}
+  \forall c \in \coreindex : \corestats'\subb{c} &\equiv \tup{
+    \begin{alignedat}{5}
+      \is{\cs¬importcount&}{R(c)_\¬importcount}\,,\;
+      \is{&\cs¬xtcount&}{R(c)_\¬xtcount}\,,\;
+      \is{&\cs¬xtsize&}{R(c)_\¬xtsize}\,,\\
+      \is{\cs¬exportcount&}{R(c)_\¬exportcount}\,,\;
+      \is{&\cs¬gasused&}{R(c)_\¬gasused}\,,\;
+      \is{&\cs¬bundlelen&}{L(c)}\,,\\
+      \is{\cs¬daload&}{D(c)}\,,\;
+      \is{&\cs¬popularity&}{\span\span \textstyle \sum_{a \in \xtassurances} a_\xa¬availabilities\subb{c}\qquad}
+    \end{alignedat}
+  }\!\!\!\!\\
+  \where R(c \in \coreindex) &\equiv
+    \!\!\!\!\!\!\!\!\!\!
+    \sum_{\wdX \in \wrX_\wr¬digests, \wrX \in \incomingreports, \wrX_\wr¬core = c}
+    \!\!\!\!\!\!\!\!\!\!
+    \tup{
+      \wdX_\¬importcount,
+      \wdX_\¬xtcount,
+      \wdX_\¬xtsize,
+      \wdX_\¬exportcount,
+      \wdX_\¬gasused,
+    }\\
+  \also L(c \in \coreindex) &\equiv
+    \!\!\!\!\!\!
+    \sum_{\wrX \in \incomingreports, \wrX_\wr¬core = c}
+    \!\!\!\!\!\!
+    (\wrX_\wr¬avspec)_\as¬bundlelen\\
+  \also D(c \in \coreindex) &\equiv
+    \!\!\!\!\!
+    \sum_{\wrX \in \justbecameavailable, \wrX_\wr¬core = c}
+    \!\!\!\!\!
+    (\wrX_\wr¬avspec)_\as¬bundlelen +
+    \Csegmentsize\ceil{(\wrX_\wr¬avspec)_\as¬segcount\nicefrac{65}{64}}
+\end{align}
+
+\newcommand*{\local¬servicesactive}{\mathbf{s}}
+\newcommand*{\local¬servicesreported}{\mathbf{s}^R}
+\newcommand*{\local¬servicesprovided}{\mathbf{s}^P}
+\newcommand*{\local¬counter}{n}
+
+最后，服务统计使用与核心统计相同的中间值更新，但使用不同的计算集合：
+\begin{align}
+  \forall s \in \local¬servicesactive : \servicestats'\subb{s} &\equiv \tup{
+    \begin{alignedat}{5}
+      \is{\ss¬importcount&}{R(s)_\¬importcount}\,,\;
+      \is{&\ss¬xtcount&}{R(s)_\¬xtcount}\,,\;
+      \is{&\ss¬xtsize&}{R(s)_\¬xtsize}\,,\\
+      \is{\ss¬exportcount&}{R(s)_\¬exportcount}\,,\;
+      \is{&\ss¬refinement&}{\span\span\tup{R(s)_\local¬counter, R(s)_\¬gasused}}\,,\;\\
+      \is{\ss¬provision&}{
+        \span\span\textstyle
+        \sum_{\tup{\xp¬serviceindex, \xp¬data}\,\in \xtpreimages}\tup{1, \len{\xp¬data}}
+      }\,,\;\\
+      \is{\ss¬accumulation&}{
+        \span\span
+        \subifnone{\accumulationstatistics\subb{s}, \tup{0, 0, 0}}
+      }
+    \end{alignedat}
+  }\!\!\!\!\\
+  \where \local¬servicesactive &=
+    \local¬servicesreported \cup
+    \local¬servicesprovided \cup
+    \keys{\accumulationstatistics}\\
+  \also \local¬servicesreported &= \set{
+    \build{\wdX_\wd¬serviceindex}{\wdX \in \wrX_\wr¬digests, \wrX \in \incomingreports}
+  }\\
+  \also \local¬servicesprovided &= \set{
+    \build{s}{\exists x: \tup{s, x} \in \xtpreimages}
+  }\\
+  \also R(s \in \serviceid) &\equiv
+    \!\!\!\!\!\!\!\!\!\!
+    \sum_{\wdX \in \wrX_\wr¬digests, \wrX \in \incomingreports, \wdX_\wd¬serviceindex = s}
+    \!\!\!\!\!\!\!\!\!\!
+    \tup{
+      \is{\local¬counter}{1},
+      \wdX_\wd¬gasused,
+      \wdX_\wd¬importcount,
+      \wdX_\wd¬xtcount,
+      \wdX_\wd¬xtsize,
+      \wdX_\wd¬exportcount
+    }
+\end{align}
